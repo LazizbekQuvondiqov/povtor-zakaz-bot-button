@@ -8,7 +8,7 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BILLZ_SECRET_KEY = os.getenv("BILLZ_SECRET_KEY")
 ALL_SHOPS_IDS = os.getenv("BILLZ_SHOP_IDS")
-POSTGRES_URL = os.getenv("POSTGRES_DATABASE_URL")
+#POSTGRES_URL = os.getenv("POSTGRES_DATABASE_URL")
 
 # Admin ID'larni string'dan integer list'ga o'tkazish
 try:

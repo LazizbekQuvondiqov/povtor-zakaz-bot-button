@@ -474,9 +474,11 @@ async def back_uni_cat(callback: CallbackQuery, state: FSMContext):
 async def back_uni_sub(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     category = data.get("selected_category")
-    # category_selected funksiyasini chaqiramiz (soxta callback bilan)
-    callback.data = f"regCat_{category}"
-    await category_selected(callback, state)
+
+    # Obyektni o'zgartirish o'rniga, uning nusxasini yaratib, ma'lumotni o'zgartiramiz
+    new_callback = callback.model_copy(update={'data': f"regCat_{category}"})
+
+    await category_selected(new_callback, state)
 # 2. Podkategoriya tanlanganda -> Supplierlar chiqadi
 @dp.callback_query(Registration.filter_subcategory, F.data.startswith("subSel_"))
 async def subcategory_selected(callback: CallbackQuery, state: FSMContext):
@@ -514,11 +516,11 @@ async def back_to_categories(callback: CallbackQuery, state: FSMContext):
 async def back_to_subcategories(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     category = data.get("selected_category")
-    # Qayta chaqirish uchun soxta callback yasaymiz
-    callback.data = f"catSel_{category}"
-    await category_selected(callback, state)
 
+    # To'g'ri usul:
+    new_callback = callback.model_copy(update={'data': f"catSel_{category}"})
 
+    await category_selected(new_callback, state)
 # --- MAIN LOOP ---
 async def scheduled_update_job():
     print("⏰ Avto-yangilash...")

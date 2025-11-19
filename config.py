@@ -19,7 +19,7 @@ except (ValueError, AttributeError):
 
 # Ma'lumotlar saqlanadigan SQLite bazasi manzili
 DB_PATH = "database/Data_Model.db"
-PRODUCTS_JSON_FILE = "database/products_cataloglar.json"
+PRODUCTS_JSON_FILE = "products_cataloglar.json"
 LAST_SYNC_FILE = "database/catalog_last_sync.txt"
 
 # Tekshiruv

@@ -269,26 +269,42 @@ def update_order_status(zakaz_id: str, new_status: str) -> bool:
         session.close()
 
 def get_full_report_data() -> pd.DataFrame:
-    """Hisobot uchun faqat generated_orders jadvalidan ma'lumot oladi.
-    d_mahsulotlar jadvaliga ulanmaydi, shuning uchun dublikatlar bo'lmaydi."""
+    """Hisobot uchun generated_orders jadvalidan BARCHA ustunlarni oladi."""
     try:
+        # --- O'ZGARISH: Aniq ustunlar o'rniga (*) qo'ydik ---
+        # Bu barcha ustunlarni (supply_price, prodano, hozirgi_qoldiq va h.k) olib keladi
+        query = "SELECT * FROM generated_orders ORDER BY created_at DESC"
 
+        df = pd.read_sql(query, engine)
 
-        query = """
-        SELECT
-            id,
-            supplier,
-            artikul,
-            subcategory,
-            shop,
-            color,
-            quantity,
-            status,
-            created_at
-        FROM generated_orders
-        ORDER BY created_at DESC
-        """
-        return pd.read_sql(query, engine)
+        # Texnik 'id' ustuni excelda kerak bo'lmasa, olib tashlaymiz
+        if 'id' in df.columns:
+            df = df.drop(columns=['id'])
+
+        # Ustunlar nomini chiroyli qilish (Ixtiyoriy)
+        rename_map = {
+            'zakaz_id': 'Zakaz ID',
+            'supplier': 'Yetkazib beruvchi',
+            'artikul': 'Artikul',
+            'category': 'Kategoriya',
+            'subcategory': 'Podkategoriya',
+            'shop': 'Do\'kon',
+            'color': 'Rang (Sana)',
+            'quantity': 'Pochka Soni',
+            'supply_price': 'Narx (Tanx)',
+            'hozirgi_qoldiq': 'Qoldiq',
+            'prodano': 'Yangi Sotuv',
+            'days_passed': 'Kun o\'tdi',
+            'ortacha_sotuv': 'O\'rtacha kunlik',
+            'kutilyotgan_sotuv': 'Haftalik prognoz',
+            'tovar_holati': 'Holat',
+            'import_date': 'Kelgan Sana',
+            'created_at': 'Yaratilgan Sana',
+            'status': 'Status'
+        }
+        df = df.rename(columns=rename_map)
+
+        return df
     except Exception as e:
         print(f"❌ Hisobot olishda xatolik: {e}")
         return pd.DataFrame()

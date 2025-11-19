@@ -508,8 +508,11 @@ def analyze_and_generate_orders(engine):
         lambda row: row['Prodano'] / (row['Дней прошло'] if row['Дней прошло'] > 0 else 1), axis=1
     )
 
-    df_analiz['kutulyotgan sotuv'] = df_analiz['o\'rtcha sotuv'] * 7
-
+# 1 kunlik tovarlarni 3 ga, eskilarini 7 ga ko'paytiramiz
+    df_analiz['kutulyotgan sotuv'] = df_analiz.apply(
+        lambda row: row['o\'rtcha sotuv'] * (3 if row['Дней прошло'] <= 1 else 7),
+        axis=1
+    )
     # --- 6. STATUS VA FILTR ---
     def calculate_tovar_status(row):
         tovar_yoshi = row['Дней прошло']

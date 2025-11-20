@@ -266,7 +266,7 @@ async def my_orders_text(message: types.Message):
         except:
             price_str = "0"
 
-        caption = f"📦 <b>{article}</b>\n💵 Narx: <b>{price_str} so'm</b>\nToifa: {first.get('subcategory', '-')}\n"
+        caption = f"📦 <b>{article}</b>\n💵 Sotish Narx: <b>{price_str} so'm</b>\nToifa: {first.get('subcategory', '-')}\n"
 
         for shop, s_group in group.groupby('shop'):
             caption += f"\n🏪 <b>{shop}:</b>"

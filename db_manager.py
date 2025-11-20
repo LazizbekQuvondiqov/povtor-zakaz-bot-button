@@ -185,19 +185,19 @@ def update_supplier_name(telegram_id: int, new_name: str) -> tuple[bool, str | N
 
         old_name = supplier.name
         
+        # Tarixga yozish (log uchun)
         history_log = SupplierNameHistory(
             telegram_id=telegram_id, old_name=old_name, new_name=cleaned_new_name
         )
         session.add(history_log)
         
-        # 1. Supplier yangilash
+        # --- O'ZGARISH SHU YERDA ---
+        # 1. Faqat Supplier (Foydalanuvchi) ismini yangilaymiz.
+        # U endi yangi nomdagi zakazlarni ko'radi.
         supplier.name = cleaned_new_name
         
-        # 2. Zakazlarni ham yangilash
-        session.execute(
-            text("UPDATE generated_orders SET supplier = :new_name WHERE supplier = :old_name"),
-            {"new_name": cleaned_new_name, "old_name": old_name}
-        )
+        # 2. generated_orders JADVALIGA TEGMAYMIZ! 
+        # (Eski kodda bu yerda session.execute(...) bor edi, uni o'chirdik).
         
         session.commit()
         return True, old_name

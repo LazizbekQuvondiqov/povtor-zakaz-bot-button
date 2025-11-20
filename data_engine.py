@@ -203,34 +203,44 @@ def update_catalog(access_token, engine):
         return suppliers[0].get("name", "") if suppliers else ""
 
     for p in all_products:
-        base = {
-            'product_id': p.get('id', ''),
-            'Артикул': p.get('sku', ''),
-            'Баркод': p.get('barcode', ''),
-            'Наименование': p.get('name', ''),
-            'Бренд': p.get('brand_name', ''),
-            'Категория': p.get('categories')[0].get('name', '') if p.get('categories') else '',
-            'Фото': p.get('main_image_url_full', p.get('main_image_url', '')),
-            'Материал': get_field(p.get('custom_fields'), 'Материал'),
-            'Вид': get_field(p.get('custom_fields'), 'Вид'),
-            'Подкатегория': get_field(p.get('custom_fields'), 'Подкатегория'),
-            'Акция': get_field(p.get('custom_fields'), 'Акция'),
-            'Модель': get_field(p.get('custom_fields'), 'Модель'),
-            'Крой': get_field(p.get('custom_fields'), 'Крой'),
-            'Дата1': get_field(p.get('custom_fields'), 'Дата'),
-            'Цвет': get_field(p.get('custom_fields'), 'Цвет'),
-            'supply_price': p.get('cost', 0),
-            'Поставщик': get_supplier_name(p.get("suppliers"))
-        }
-
-        # Har bir do'kon narxini tekshirish
-        for shop in p.get('shop_prices') or []:
-            shop_name = shop.get('shop_name', '').strip().upper()
-            if shop_name in TARGET_SHOPS:
-                rec = base.copy()
-                rec['Магазин'] = shop_name
-                rec['Цена продажи'] = shop.get('retail_price', 0)
-                processed_data.append(rec)
+            base = {
+                'product_id': p.get('id', ''),
+                'Артикул': p.get('sku', ''),
+                'Баркод': p.get('barcode', ''),
+                'Наименование': p.get('name', ''),
+                'Бренд': p.get('brand_name', ''),
+                'Категория': p.get('categories')[0].get('name', '') if p.get('categories') else '',
+                'Фото': p.get('main_image_url_full', p.get('main_image_url', '')),
+                'Материал': get_field(p.get('custom_fields'), 'Материал'),
+                'Вид': get_field(p.get('custom_fields'), 'Вид'),
+                'Подкатегория': get_field(p.get('custom_fields'), 'Подкатегория'),
+                'Акция': get_field(p.get('custom_fields'), 'Акция'),
+                'Модель': get_field(p.get('custom_fields'), 'Модель'),
+                'Крой': get_field(p.get('custom_fields'), 'Крой'),
+                'Дата1': get_field(p.get('custom_fields'), 'Дата'),
+                'Цвет': get_field(p.get('custom_fields'), 'Цвет'),
+                'supply_price': 0, # Boshlanishiga 0, pastda o'zgartiramiz
+                'Поставщик': get_supplier_name(p.get("suppliers"))
+            }
+    
+            # Har bir do'kon narxini tekshirish
+            for shop in p.get('shop_prices') or []:
+                shop_name = shop.get('shop_name', '').strip().upper()
+                
+                if shop_name in TARGET_SHOPS:
+                    rec = base.copy()
+                    rec['Магазин'] = shop_name
+                    
+                    # Sotuv narxini olamiz
+                    narx = shop.get('retail_price', 0)
+    
+                    # 1. Asosiy narx ustuni (hisob-kitoblar uchun)
+                    rec['Цена продажи'] = narx
+                    
+                    # 2. "Tanx narxi" o'rniga ham SOTUV NARXINI yozamiz (Botda ko'rinishi uchun)
+                    rec['supply_price'] = narx
+                    
+                    processed_data.append(rec)
 
     if processed_data:
         d_mahsulotlar = pd.DataFrame(processed_data)

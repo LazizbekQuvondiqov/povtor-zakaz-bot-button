@@ -357,3 +357,34 @@ def get_unassigned_suppliers_by_filter(category: str, subcategory: str) -> list[
         return []
     finally:
         session.close()
+
+
+
+
+def get_supplier_stats_detailed(telegram_id: int):
+    """
+    Yetkazib beruvchi uchun: Kategoriya va Podkategoriya bo'yicha pochkalarni hisoblaydi.
+    """
+    session = Session()
+    try:
+        # 1. Yetkazib beruvchi nomini aniqlaymiz
+        supplier = session.query(Supplier).filter_by(telegram_id=telegram_id).first()
+        if not supplier:
+            return []
+
+        # 2. Faqat shu odamga tegishli zakazlarni guruhlab olamiz
+        results = session.query(
+            GeneratedOrder.category,
+            GeneratedOrder.subcategory,
+            func.sum(GeneratedOrder.quantity)
+        ).filter(
+            GeneratedOrder.supplier == supplier.name,
+            GeneratedOrder.status == 'Kutilmoqda'
+        ).group_by(
+            GeneratedOrder.category,
+            GeneratedOrder.subcategory
+        ).all()
+        
+        return results # Qaytaradi: [('Shim', 'Jinsi', 5), ('Shim', 'Slaks', 3)...]
+    finally:
+        session.close()

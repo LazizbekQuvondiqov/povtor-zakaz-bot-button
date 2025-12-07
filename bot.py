@@ -232,7 +232,7 @@ async def invite_command(message: types.Message):
 async def show_statistics(message: types.Message):
     user_id = message.from_user.id
     
-    # 1. Agar ADMIN bo'lsa -> Oddiy umumiy hisobotni ko'raversin
+    # 1. Agar ADMIN bo'lsa -> Oddiy umumiy hisobot
     if db_manager.is_admin(user_id):
         count, pochka = db_manager.get_stats(user_id)
         await message.answer(
@@ -242,11 +242,17 @@ async def show_statistics(message: types.Message):
         )
         return
 
-    # 2. Agar SUPPLIER bo'lsa -> Batafsil (Kategoriya bo'yicha) ko'radi
+    # 2. Agar SUPPLIER bo'lsa -> Ismi va Batafsil statstika
+    
+    # --- ISMNI ANIQLASH QISMI QO'SHILDI ---
+    supplier = db_manager.get_supplier_by_id(user_id)
+    current_name = supplier.name if supplier else "Noma'lum"
+    # --------------------------------------
+
     data = db_manager.get_supplier_stats_detailed(user_id)
 
     if not data:
-        await message.answer("✅ <b>Ajoyib!</b> Hozircha sizda bajarilmagan zakazlar yo'q.")
+        await message.answer(f"👤 Ism: <b>{current_name}</b>\n✅ <b>Ajoyib!</b> Hozircha sizda bajarilmagan zakazlar yo'q.")
         return
 
     # Ma'lumotlarni chiroyli formatlash
@@ -259,12 +265,13 @@ async def show_statistics(message: types.Message):
         report[cat].append(f"▫️ {sub}: <b>{int(qty)} pochka</b>")
         total_packs += qty
 
-    # Xabarni yig'ish
-    text = f"📊 <b>SIZNING ZAKAZLARINGIZ:</b>\n\n"
+    # Xabarni yig'ish (ISMNI QO'SHAMIZ)
+    text = f"📊 <b>SIZNING ZAKAZLARINGIZ:</b>\n"
+    text += f"👤 Ism: <b>{current_name}</b>\n\n"  # <-- MANA SHU YERGA QO'SHILDI
     
     for category, lines in report.items():
-        text += f"📂 <b>{category}</b>\n"      # Kategoriya nomi
-        text += "\n".join(lines) + "\n\n"     # Podkategoriyalar
+        text += f"📂 <b>{category}</b>\n"
+        text += "\n".join(lines) + "\n\n"
 
     text += f"━━━━━━━━━━━━━━\n🚛 <b>JAMI: {int(total_packs)} POCHKA</b>"
 

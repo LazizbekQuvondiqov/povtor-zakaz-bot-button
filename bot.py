@@ -232,13 +232,25 @@ async def invite_command(message: types.Message):
 async def show_statistics(message: types.Message):
     user_id = message.from_user.id
     
-    # 1. Agar ADMIN bo'lsa -> Oddiy umumiy hisobot
+    # 1. ADMIN LOGIKASI (Ichma-ich kirish)
     if db_manager.is_admin(user_id):
-        count, pochka = db_manager.get_stats(user_id)
+        categories = db_manager.get_stat_categories_global()
+        
+        if not categories:
+            await message.answer("✅ Hozircha aktiv zakazlar yo'q.")
+            return
+
+        kb = []
+        for cat in categories:
+            # Callback data: 'stCat_' + kategoriya nomi
+            kb.append([InlineKeyboardButton(text=f"📂 {cat}", callback_data=f"stCat_{cat}")])
+        
+        # Yopish tugmasi
+        kb.append([InlineKeyboardButton(text="❌ Yopish", callback_data="del_msg")])
+        
         await message.answer(
-            f"👨‍💼 <b>Admin Statistikasi</b>\n\n"
-            f"📦 Jami aktiv zakazlar: <b>{count} ta</b> (Artikul)\n"
-            f"🚛 Jami hajm: <b>{int(pochka)} pochka</b>"
+            "📊 <b>UMUMIY STATISTIKA</b>\n\nQaysi bo'limni ko'rmoqchisiz?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
         )
         return
 
@@ -590,6 +602,73 @@ async def send_reminders():
         try:
             await bot.send_message(uid, "<b>🔔 Eslatma!</b> Javob berilmagan zakazlar:\n" + "\n".join(items))
         except Exception: pass
+
+
+# --- ADMIN STATISTIKA NAVIGATSIYASI ---
+
+# 1. Kategoriya tanlanganda -> Podkategoriyalar chiqadi
+@dp.callback_query(F.data.startswith("stCat_"))
+async def stat_category_click(callback: CallbackQuery):
+    category = callback.data.split("stCat_", 1)[1]
+    
+    subs = db_manager.get_stat_subcategories_global(category)
+    
+    kb = []
+    for sub in subs:
+        # Callback data: 'stSub_' + kategoriya + separator + subkategoriya
+        # Separator sifatida '|' belgisini ishlatamiz
+        kb.append([InlineKeyboardButton(text=f"🔹 {sub}", callback_data=f"stSub_{category}|{sub}")])
+    
+    # Orqaga qaytish
+    kb.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="stBack_root")])
+    
+    await callback.message.edit_text(
+        f"📂 <b>{category}</b>\nIchki turlarni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+# 2. Podkategoriya tanlanganda -> Aniq son chiqadi
+@dp.callback_query(F.data.startswith("stSub_"))
+async def stat_subcategory_click(callback: CallbackQuery):
+    # Datani ajratib olamiz: "Shimlar|Jinsi"
+    data_full = callback.data.split("stSub_", 1)[1]
+    category, subcategory = data_full.split("|", 1)
+    
+    total_packs = db_manager.get_stat_total_packs(category, subcategory)
+    
+    # Qayta tanlash uchun tugmalar
+    kb = [
+        [InlineKeyboardButton(text="⬅️ Ortga qaytish", callback_data=f"stCat_{category}")]
+    ]
+    
+    await callback.message.edit_text(
+        f"📊 <b>NATIJA:</b>\n\n"
+        f"📂 Kategoriya: <b>{category}</b>\n"
+        f"🔹 Podkategoriya: <b>{subcategory}</b>\n\n"
+        f"📦 Jami zakaz: <b>{int(total_packs)} pochka</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+# 3. "Orqaga" va "Yopish" tugmalari
+@dp.callback_query(F.data == "stBack_root")
+async def stat_back_root(callback: CallbackQuery):
+    # Qaytadan kategoriyalarni yuklaymiz
+    categories = db_manager.get_stat_categories_global()
+    kb = []
+    for cat in categories:
+        kb.append([InlineKeyboardButton(text=f"📂 {cat}", callback_data=f"stCat_{cat}")])
+    kb.append([InlineKeyboardButton(text="❌ Yopish", callback_data="del_msg")])
+    
+    await callback.message.edit_text(
+        "📊 <b>UMUMIY STATISTIKA</b>\n\nQaysi bo'limni ko'rmoqchisiz?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+@dp.callback_query(F.data == "del_msg")
+async def delete_msg(callback: CallbackQuery):
+    await callback.message.delete()
+    
+
 
 async def main():
     db_manager.init_db()

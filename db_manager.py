@@ -431,31 +431,3 @@ def get_stat_total_packs(category, subcategory):
         session.close()
 
 
-def get_stats_by_age_range(min_day, max_day):
-    """
-    Berilgan kun oralig'idagi (min-max) zakazlarni
-    Kategoriya va Podkategoriya bo'yicha guruhlab beradi.
-    """
-    session = Session()
-    try:
-        # Agar max_day juda katta bo'lsa (masalan 100+), uni chegaralamaymiz
-        if max_day > 100:
-            date_filter = GeneratedOrder.days_passed >= min_day
-        else:
-            date_filter = (GeneratedOrder.days_passed >= min_day) & (GeneratedOrder.days_passed <= max_day)
-
-        results = session.query(
-            GeneratedOrder.category,
-            GeneratedOrder.subcategory,
-            func.sum(GeneratedOrder.quantity)
-        ).filter(
-            GeneratedOrder.status == 'Kutilmoqda',
-            date_filter
-        ).group_by(
-            GeneratedOrder.category,
-            GeneratedOrder.subcategory
-        ).all()
-        
-        return results
-    finally:
-        session.close()

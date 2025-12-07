@@ -388,3 +388,44 @@ def get_supplier_stats_detailed(telegram_id: int):
         return results # Qaytaradi: [('Shim', 'Jinsi', 5), ('Shim', 'Slaks', 3)...]
     finally:
         session.close()
+
+
+
+
+# --- ADMIN STATISTIKASI UCHUN YANGI FUNKSIYALAR ---
+
+def get_stat_categories_global():
+    """Faqat 'Kutilmoqda' statusidagi bor Kategoriyalar ro'yxatini qaytaradi"""
+    session = Session()
+    try:
+        query = session.query(GeneratedOrder.category).filter(
+            GeneratedOrder.status == 'Kutilmoqda'
+        ).distinct()
+        return sorted([r[0] for r in query.all() if r[0]])
+    finally:
+        session.close()
+
+def get_stat_subcategories_global(category):
+    """Tanlangan Kategoriya ichidagi Podkategoriyalar ro'yxati"""
+    session = Session()
+    try:
+        query = session.query(GeneratedOrder.subcategory).filter(
+            GeneratedOrder.category == category,
+            GeneratedOrder.status == 'Kutilmoqda'
+        ).distinct()
+        return sorted([r[0] for r in query.all() if r[0]])
+    finally:
+        session.close()
+
+def get_stat_total_packs(category, subcategory):
+    """Aniq bir turdagi tovarning umumiy pochka soni"""
+    session = Session()
+    try:
+        total = session.query(func.sum(GeneratedOrder.quantity)).filter(
+            GeneratedOrder.category == category,
+            GeneratedOrder.subcategory == subcategory,
+            GeneratedOrder.status == 'Kutilmoqda'
+        ).scalar()
+        return total or 0
+    finally:
+        session.close()

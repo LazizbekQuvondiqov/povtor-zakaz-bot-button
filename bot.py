@@ -45,8 +45,9 @@ class IsAdmin(BaseFilter):
 def get_admin_keyboard():
     """Adminlar uchun asosiy menyu"""
     kb = [
-        [KeyboardButton(text="📊 Hisobot"), KeyboardButton(text="⚙️ Sozlamalar")],
-        [KeyboardButton(text="🔄 Majburiy Yangilash")]
+        # Mana bu yerda "Statistika" bo'lishi shart 👇
+        [KeyboardButton(text="📊 Hisobot"), KeyboardButton(text="📈 Statistika")],
+        [KeyboardButton(text="⚙️ Sozlamalar"), KeyboardButton(text="🔄 Majburiy Yangilash")]
     ]
     return ReplyKeyboardMarkup(
         keyboard=kb,
@@ -57,7 +58,8 @@ def get_admin_keyboard():
 def get_supplier_keyboard():
     """Yetkazib beruvchilar uchun asosiy menyu"""
     kb = [
-        [KeyboardButton(text="📦 Zakazlarim")],
+        # Mana bu yerda ham 👇
+        [KeyboardButton(text="📦 Zakazlarim"), KeyboardButton(text="📈 Statistika")],
         [KeyboardButton(text="📝 Ismni o'zgartirish")]
     ]
     return ReplyKeyboardMarkup(

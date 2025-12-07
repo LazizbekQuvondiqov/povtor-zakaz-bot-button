@@ -1,5 +1,5 @@
 # --- BU BOT.PY FAYLINING ZAMONAVIY INTERFEYSLI VARIANTI ---
-
+import uuid # <-- Buni importlar qatoriga qo'shing
 import asyncio
 import pandas as pd
 import io
@@ -21,7 +21,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import config
 import db_manager
 import data_engine
-
+# Buni esa importlardan keyin, bot=Bot(...) dan oldinroqqa qo'ying
+STAT_CACHE = {}
 # --- Bot sozlamalari ---
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
@@ -609,15 +610,22 @@ async def send_reminders():
 # 1. Kategoriya tanlanganda -> Podkategoriyalar chiqadi
 @dp.callback_query(F.data.startswith("stCat_"))
 async def stat_category_click(callback: CallbackQuery):
+    # Kategoriya nomini olamiz
     category = callback.data.split("stCat_", 1)[1]
     
     subs = db_manager.get_stat_subcategories_global(category)
     
     kb = []
     for sub in subs:
-        # Callback data: 'stSub_' + kategoriya + separator + subkategoriya
-        # Separator sifatida '|' belgisini ishlatamiz
-        kb.append([InlineKeyboardButton(text=f"🔹 {sub}", callback_data=f"stSub_{category}|{sub}")])
+        # --- MUHIM O'ZGARISH ---
+        # Uzun nomlarni sig'dirish uchun unikal ID ishlatamiz
+        unique_id = str(uuid.uuid4())[:8]  # Masalan: 'a1b2c3d4'
+        
+        # Ma'lumotni xotiraga saqlaymiz: ID -> (Kategoriya, Podkategoriya)
+        STAT_CACHE[unique_id] = (category, sub)
+        
+        # Tugmaga faqat qisqa ID ni yozamiz (Xatolik bermaydi)
+        kb.append([InlineKeyboardButton(text=f"🔹 {sub}", callback_data=f"stSub_{unique_id}")])
     
     # Orqaga qaytish
     kb.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="stBack_root")])
@@ -630,13 +638,21 @@ async def stat_category_click(callback: CallbackQuery):
 # 2. Podkategoriya tanlanganda -> Aniq son chiqadi
 @dp.callback_query(F.data.startswith("stSub_"))
 async def stat_subcategory_click(callback: CallbackQuery):
-    # Datani ajratib olamiz: "Shimlar|Jinsi"
-    data_full = callback.data.split("stSub_", 1)[1]
-    category, subcategory = data_full.split("|", 1)
+    # Qisqa ID ni olamiz
+    unique_id = callback.data.split("stSub_", 1)[1]
+    
+    # Xotiradan haqiqiy nomlarni qidiramiz
+    data = STAT_CACHE.get(unique_id)
+    
+    if not data:
+        await callback.answer("⚠️ Ma'lumot eskirgan, qaytadan oching.", show_alert=True)
+        return
+
+    category, subcategory = data
     
     total_packs = db_manager.get_stat_total_packs(category, subcategory)
     
-    # Qayta tanlash uchun tugmalar
+    # Qayta tanlash uchun tugma
     kb = [
         [InlineKeyboardButton(text="⬅️ Ortga qaytish", callback_data=f"stCat_{category}")]
     ]
@@ -667,7 +683,6 @@ async def stat_back_root(callback: CallbackQuery):
 @dp.callback_query(F.data == "del_msg")
 async def delete_msg(callback: CallbackQuery):
     await callback.message.delete()
-    
 
 
 async def main():

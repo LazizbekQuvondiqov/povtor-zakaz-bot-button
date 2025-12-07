@@ -237,8 +237,8 @@ def update_catalog(access_token, engine):
                     # 1. Asosiy narx ustuni (hisob-kitoblar uchun)
                     rec['Цена продажи'] = narx
                     
-                    # 2. "Tanx narxi" o'rniga ham SOTUV NARXINI yozamiz (Botda ko'rinishi uchun)
-                    rec['supply_price'] = narx
+
+                    rec['supply_price'] = p.get('supply_price', 0)
                     
                     processed_data.append(rec)
 

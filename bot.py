@@ -59,15 +59,11 @@ def get_admin_keyboard():
 def get_supplier_keyboard():
     """Yetkazib beruvchilar uchun asosiy menyu"""
     kb = [
-        # Mana bu yerda ham 👇
         [KeyboardButton(text="📦 Zakazlarim"), KeyboardButton(text="📈 Statistika")],
-        [KeyboardButton(text="📝 Ismni o'zgartirish")]
+        # MANA BU TUGMANI QO'SHING 👇
+        [KeyboardButton(text="📅 Import Tahlili"), KeyboardButton(text="📝 Ismni o'zgartirish")]
     ]
-    return ReplyKeyboardMarkup(
-        keyboard=kb,
-        resize_keyboard=True,
-        input_field_placeholder="Menyudan tanlang..."
-    )
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 # --- Yordamchi Funksiyalar ---
 
@@ -693,6 +689,163 @@ async def main():
     scheduler.add_job(send_reminders, 'cron', hour=10, minute=0)
     scheduler.start()
     await dp.start_polling(bot)
+
+
+
+
+
+
+# -------------------------------------------------------------------------
+# --- IMPORT (KUN) TAHLILI LOGIKASI (GLOBAL KO'RISH) ---
+# -------------------------------------------------------------------------
+
+@dp.message(F.text == "📅 Import Tahlili")
+async def import_analysis_start(message: types.Message):
+    # 1. Bazadan Admin o'rnatgan qoidalarni olamiz
+    settings = db_manager.get_all_settings()
+    ranges = []
+    
+    rule_labels = {
+        4: "🔥 4-Qoida (Eng yangi)",
+        3: "⚡️ 3-Qoida",
+        2: "⚠️ 2-Qoida",
+        1: "❄️ 1-Qoida (Eski)"
+    }
+
+    # 4 dan 1 gacha aylanamiz
+    for i in [4, 3, 2, 1]:
+        min_d = int(settings.get(f'm{i}_min_days', 0))
+        max_d = int(settings.get(f'm{i}_max_days', 0))
+        if max_d > 0:
+            btn_text = f"{rule_labels[i]}: {min_d}-{max_d} kun"
+            ranges.append((min_d, max_d, btn_text))
+    
+    kb = []
+    for mn, mx, label in ranges:
+        kb.append([InlineKeyboardButton(text=label, callback_data=f"impRange_{mn}-{mx}")])
+    
+    kb.append([InlineKeyboardButton(text="❌ Yopish", callback_data="del_msg")])
+    
+    await message.answer(
+        "📅 <b>IMPORT TAHLILI</b>\n\n"
+        "Bozordagi umumiy holatni ko'rish uchun muddatni tanlang:", 
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+# 1. Kun tanlanganda -> Kategoriya chiqadi
+@dp.callback_query(F.data.startswith("impRange_"))
+async def imp_range_click(callback: CallbackQuery):
+    mn, mx = map(int, callback.data.split("_")[1].split("-"))
+    
+    # GLOBAL qidiruv (Supplier filtrlanmaydi)
+    cats = db_manager.get_stats_by_import_days(mn, mx)
+    
+    if not cats:
+        await callback.answer("⚠️ Bu muddatda zakazlar yo'q", show_alert=True)
+        return
+
+    kb = []
+    for cat in cats:
+        unique_id = str(uuid.uuid4())[:8]
+        STAT_CACHE[unique_id] = (mn, mx, cat)
+        kb.append([InlineKeyboardButton(text=f"📂 {cat}", callback_data=f"impCat_{unique_id}")])
+    
+    kb.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="impBack_root")])
+    
+    await callback.message.edit_text(
+        f"📅 <b>{mn}-{mx} kunlik tovarlar</b>\nKategoriyani tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+# 2. Kategoriya tanlanganda -> Podkategoriya chiqadi
+@dp.callback_query(F.data.startswith("impCat_"))
+async def imp_cat_click(callback: CallbackQuery):
+    uid = callback.data.split("_")[1]
+    data = STAT_CACHE.get(uid)
+    if not data: return
+    
+    mn, mx, cat = data
+    subs = db_manager.get_stats_by_import_days(mn, mx, category=cat)
+    
+    kb = []
+    for sub in subs:
+        unique_id = str(uuid.uuid4())[:8]
+        STAT_CACHE[unique_id] = (mn, mx, cat, sub)
+        kb.append([InlineKeyboardButton(text=f"🔹 {sub}", callback_data=f"impSub_{unique_id}")])
+    
+    kb.append([InlineKeyboardButton(text="⬅️ Boshiga", callback_data="impBack_root")])
+    
+    await callback.message.edit_text(
+        f"📂 <b>{cat}</b> ({mn}-{mx} kun)\nPodkategoriyani tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+# 3. Podkategoriya tanlanganda -> KARTOCHKALAR CHIQADI
+@dp.callback_query(F.data.startswith("impSub_"))
+async def imp_sub_click(callback: CallbackQuery):
+    uid = callback.data.split("_")[1]
+    data = STAT_CACHE.get(uid)
+    if not data: return
+    
+    mn, mx, cat, sub = data
+    
+    # 1. Bazadan DataFrame olamiz (Global ro'yxat)
+    orders_df = await asyncio.to_thread(db_manager.get_import_orders_detailed, mn, mx, cat, sub)
+    
+    if orders_df.empty:
+        await callback.answer("⚠️ Ma'lumot topilmadi.", show_alert=True)
+        return
+
+    await callback.message.delete()
+    await callback.message.answer(f"⏳ <b>{cat} > {sub}</b> ({mn}-{mx} kun)\nMa'lumotlar yuklanmoqda...")
+
+    # 2. Artikul bo'yicha guruhlaymiz
+    grouped = orders_df.groupby('artikul')
+    
+    for article, group in grouped:
+        first = group.iloc[0]
+        price = first.get('supply_price', 0)
+        try:
+            price_str = f"{float(price):,.0f}".replace(",", " ")
+        except:
+            price_str = "0"
+
+        # Matn: Supplier nomi va Umumiy ma'lumot
+        caption = f"📦 <b>{article}</b>\n"
+        caption += f"👤 Postavchik: <b>{first.get('supplier', 'Noma\'lum')}</b>\n"
+        caption += f"💵 Tan Narx: <b>{price_str} so'm</b>\n"
+        caption += f"Toifa: {first.get('subcategory', '-')}\n"
+
+        # Do'konlar
+        for shop, s_group in group.groupby('shop'):
+            caption += f"\n🏪 <b>{shop}:</b>"
+            for _, row in s_group.iterrows():
+                color_info = row.get('color', '-')
+                caption += f"\n  - {color_info}: <b>{int(row.get('quantity', 0))} pochka</b>"
+
+        photo = str(first.get('photo', ''))
+        
+        try:
+            if photo.startswith('http'):
+                if len(caption) > 1024:
+                    await bot.send_photo(callback.message.chat.id, photo)
+                    await bot.send_message(callback.message.chat.id, caption)
+                else:
+                    await bot.send_photo(callback.message.chat.id, photo, caption=caption)
+            else:
+                await bot.send_message(callback.message.chat.id, caption)
+        except Exception:
+            await bot.send_message(callback.message.chat.id, caption)
+        
+        await asyncio.sleep(0.3)
+
+    kb = [[InlineKeyboardButton(text="🔄 Boshqa bo'lim", callback_data="impBack_root")]]
+    await bot.send_message(callback.message.chat.id, "✅ Ro'yxat tugadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+@dp.callback_query(F.data == "impBack_root")
+async def imp_back_root(callback: CallbackQuery):
+    await import_analysis_start(callback.message)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -431,3 +431,54 @@ def get_stat_total_packs(category, subcategory):
         session.close()
 
 
+# --- YANGI QO'SHILGAN: IMPORT TAHLILI FUNKSIYALARI ---
+
+def get_stats_by_import_days(min_day, max_day, category=None):
+    """
+    Kun oralig'i bo'yicha GLOBAL qidiruv.
+    Supplier nomiga qarab filtrlamaydi!
+    """
+    session = Session()
+    try:
+        query = session.query(GeneratedOrder).filter(
+            GeneratedOrder.status == 'Kutilmoqda',
+            GeneratedOrder.days_passed >= min_day,
+            GeneratedOrder.days_passed <= max_day
+        )
+
+        if category is None:
+            # Kategoriyalarni olish
+            results = query.with_entities(GeneratedOrder.category).distinct().all()
+        else:
+            # Podkategoriyalarni olish
+            results = query.filter(GeneratedOrder.category == category).with_entities(GeneratedOrder.subcategory).distinct().all()
+
+        return sorted([r[0] for r in results if r[0]])
+    finally:
+        session.close()
+
+def get_import_orders_detailed(min_day, max_day, category, subcategory):
+    """
+    Kartochkalar chiqarish uchun kerakli BARCHA ma'lumotni 
+    Pandas DataFrame shaklida qaytaradi.
+    """
+    try:
+        query = """
+        SELECT * FROM generated_orders 
+        WHERE status = 'Kutilmoqda' 
+          AND days_passed >= %(min_d)s 
+          AND days_passed <= %(max_d)s
+          AND category = %(cat)s
+          AND subcategory = %(sub)s
+        """
+        params = {
+            "min_d": min_day, 
+            "max_d": max_day, 
+            "cat": category, 
+            "sub": subcategory
+        }
+        
+        return pd.read_sql(query, engine, params=params)
+    except Exception as e:
+        print(f"❌ Import detallarini olishda xatolik: {e}")
+        return pd.DataFrame()

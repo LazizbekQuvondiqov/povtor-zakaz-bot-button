@@ -223,7 +223,8 @@ def update_catalog(access_token, engine):
                 'Поставщик': get_supplier_name(p.get("suppliers"))
             }
     
-            # Har bir do'kon narxini tekshirish
+            
+# Har bir do'kon narxini tekshirish
             for shop in p.get('shop_prices') or []:
                 shop_name = shop.get('shop_name', '').strip().upper()
                 
@@ -237,8 +238,10 @@ def update_catalog(access_token, engine):
                     # 1. Asosiy narx ustuni (hisob-kitoblar uchun)
                     rec['Цена продажи'] = narx
                     
-
-                    rec['supply_price'] = p.get('supply_price', 0)
+                    # --- O'ZGARISH SHU YERDA ---
+                    # Supply price (Kelish narxi)ni aynan shu do'kon ma'lumotidan olamiz
+                    rec['supply_price'] = shop.get('supply_price', 0)
+                    # ---------------------------
                     
                     processed_data.append(rec)
 

@@ -521,9 +521,11 @@ def analyze_and_generate_orders(engine):
         lambda row: row['Prodano'] / (row['Дней прошло'] if row['Дней прошло'] > 0 else 1), axis=1
     )
 
-# 1 kunlik tovarlarni 3 ga, eskilarini 7 ga ko'paytiramiz
+# YANGI STRATEGIYA: 
+    # 1-9 kunlik (3 va 4-qoida) tovarlar uchun 10 kunlik zaxira (Aggressiv o'sish)
+    # 10 kun va undan eskilar (2-qoida) uchun 7 kunlik zaxira (Stabil ushlash)
     df_analiz['kutulyotgan sotuv'] = df_analiz.apply(
-        lambda row: row['o\'rtcha sotuv'] * (3 if row['Дней прошло'] <= 1 else 7),
+        lambda row: row['o\'rtcha sotuv'] * (10 if row['Дней прошло'] <= 9 else 7),
         axis=1
     )
     # --- 6. STATUS VA FILTR ---

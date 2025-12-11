@@ -305,26 +305,29 @@ def update_sales(access_token, engine):
 
 
         if day_chunks:
-            daily_df = pd.concat(day_chunks, ignore_index=True)
-
-            try:
-
-                with engine.begin() as conn:
-                    # Oldin o'chirishga urinamiz, agar jadval yo'q bo'lsa, indamay o'tib ketamiz
+                    daily_df = pd.concat(day_chunks, ignore_index=True)
+        
                     try:
-                        delete_query = text(f'DELETE FROM f_sotuvlar WHERE "Дата" >= \'{day_str} 00:00:00\' AND "Дата" <= \'{day_str} 23:59:59\'')
-                        conn.execute(delete_query)
-                    except Exception:
-                        pass # Jadval yo'q bo'lsa, xato berma
-                    
-                    # Keyin yozamiz (o'zi jadvalni yaratadi)
-                    daily_df.to_sql("f_sotuvlar", conn, if_exists="append", index=False)
-                print(f"✅ {day_str} muvaffaqiyatli yangilandi. ({len(daily_df)} qator)")
-            except Exception as e:
-                print(f"❌ {day_str} ni bazaga yozishda xatolik: {e}")
-
-        else:
-            print(f"ℹ️ {day_str} uchun sotuv yo'q.")
+                        # 1. Alohida sessiya ochib o'chirishga urinamiz
+                        try:
+                            with engine.begin() as conn:
+                                # Aniq sana bo'yicha o'chirish
+                                delete_query = text(f'DELETE FROM f_sotuvlar WHERE "Дата" >= \'{day_str} 00:00:00\' AND "Дата" <= \'{day_str} 23:59:59\'')
+                                conn.execute(delete_query)
+                        except Exception:
+                            pass # Jadval yo'q bo'lsa, xato bermaymiz
+        
+                        # 2. Alohida yangi sessiya ochib yozamiz
+                        with engine.begin() as conn:
+                            daily_df.to_sql("f_sotuvlar", conn, if_exists="append", index=False)
+                        
+                        print(f"✅ {day_str} muvaffaqiyatli yangilandi. ({len(daily_df)} qator)")
+        
+                    except Exception as e:
+                        print(f"❌ {day_str} ni bazaga yozishda xatolik: {e}")
+        
+                else:
+                    print(f"ℹ️ {day_str} uchun sotuv yo'q.")
 
         current_process_date += timedelta(days=1)
 
@@ -355,7 +358,7 @@ def update_stock(access_token, engine):
         print(f"⚠️ Sana aniqlash xatosi: {e}")
 
     current_process_date = start_date
-
+    
     while current_process_date <= end_date:
         day_str = current_process_date.strftime("%Y-%m-%d")
         print(f"⏳ {day_str} qoldiqlari olinmoqda...")
@@ -387,20 +390,24 @@ def update_stock(access_token, engine):
                 time.sleep(60)
                 page = 1
                 day_chunks = []
-
+        
         if day_chunks:
-            daily_df = pd.concat(day_chunks, ignore_index=True)
-            try:
-                with engine.begin() as conn:
-                    try:
-                        conn.execute(text(f'DELETE FROM f_qoldiqlar WHERE "Дата" = \'{day_str}\''))
-                    except Exception:
-                        pass
+                    daily_df = pd.concat(day_chunks, ignore_index=True)
                     
-                    daily_df.to_sql("f_qoldiqlar", conn, if_exists="append", index=False)
-                print(f"✅ {day_str} qoldiq yozildi.")
-            except Exception as e:
-                print(f"❌ {day_str} qoldiqni bazaga yozishda xatolik: {e}")
+                    # 1. QADAM: Eski ma'lumotni o'chirishga urinib ko'ramiz (Alohida sessiya)
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text(f'DELETE FROM f_qoldiqlar WHERE "Дата" = \'{day_str}\''))
+                    except Exception:
+                        pass # Jadval yo'q bo'lsa, indamaymiz. Sessiya yopildi.
+        
+                    # 2. QADAM: Yangi ma'lumotni yozamiz (Yangi toza sessiya)
+                    try:
+                        with engine.begin() as conn:
+                            daily_df.to_sql("f_qoldiqlar", conn, if_exists="append", index=False)
+                        print(f"✅ {day_str} qoldiq yozildi.")
+                    except Exception as e:
+                        print(f"❌ {day_str} qoldiqni bazaga yozishda xatolik: {e}")
 
         current_process_date += timedelta(days=1)
 

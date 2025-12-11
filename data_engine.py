@@ -310,12 +310,15 @@ def update_sales(access_token, engine):
             try:
 
                 with engine.begin() as conn:
-
-                    delete_query = text(f'DELETE FROM f_sotuvlar WHERE "Дата" >= \'{day_str} 00:00:00\' AND "Дата" <= \'{day_str} 23:59:59\'')
-                    conn.execute(delete_query)
-
+                    # Oldin o'chirishga urinamiz, agar jadval yo'q bo'lsa, indamay o'tib ketamiz
+                    try:
+                        delete_query = text(f'DELETE FROM f_sotuvlar WHERE "Дата" >= \'{day_str} 00:00:00\' AND "Дата" <= \'{day_str} 23:59:59\'')
+                        conn.execute(delete_query)
+                    except Exception:
+                        pass # Jadval yo'q bo'lsa, xato berma
+                    
+                    # Keyin yozamiz (o'zi jadvalni yaratadi)
                     daily_df.to_sql("f_sotuvlar", conn, if_exists="append", index=False)
-
                 print(f"✅ {day_str} muvaffaqiyatli yangilandi. ({len(daily_df)} qator)")
             except Exception as e:
                 print(f"❌ {day_str} ni bazaga yozishda xatolik: {e}")

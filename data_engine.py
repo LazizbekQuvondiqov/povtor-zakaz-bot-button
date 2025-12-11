@@ -305,29 +305,32 @@ def update_sales(access_token, engine):
 
 
         if day_chunks:
-                    daily_df = pd.concat(day_chunks, ignore_index=True)
+            daily_df = pd.concat(day_chunks, ignore_index=True)
         
-                    try:
-                        # 1. Alohida sessiya ochib o'chirishga urinamiz
-                        try:
-                            with engine.begin() as conn:
-                                # Aniq sana bo'yicha o'chirish
-                                delete_query = text(f'DELETE FROM f_sotuvlar WHERE "Дата" >= \'{day_str} 00:00:00\' AND "Дата" <= \'{day_str} 23:59:59\'')
-                                conn.execute(delete_query)
-                        except Exception:
-                            pass # Jadval yo'q bo'lsa, xato bermaymiz
+            try:
+                # 1. Alohida sessiya ochib o‘chirishga urinamiz
+                try:
+                    with engine.begin() as conn:
+                        delete_query = text(f'''
+                        DELETE FROM f_sotuvlar 
+                        WHERE "Дата" >= '{day_str} 00:00:00' 
+                        AND "Дата" <= '{day_str} 23:59:59'
+                        ''')
+                        conn.execute(delete_query)
+                except Exception:
+                    pass
         
-                        # 2. Alohida yangi sessiya ochib yozamiz
-                        with engine.begin() as conn:
-                            daily_df.to_sql("f_sotuvlar", conn, if_exists="append", index=False)
-                        
-                        print(f"✅ {day_str} muvaffaqiyatli yangilandi. ({len(daily_df)} qator)")
+                # 2. Yangi ma'lumotni yozamiz
+                with engine.begin() as conn:
+                    daily_df.to_sql("f_sotuvlar", conn, if_exists="append", index=False)
         
-                    except Exception as e:
-                        print(f"❌ {day_str} ni bazaga yozishda xatolik: {e}")
+                print(f"✅ {day_str} muvaffaqiyatli yangilandi. ({len(daily_df)} qator)")
+            except Exception as e:
+                print(f"❌ {day_str} ni bazaga yozishda xatolik: {e}")
         
-                else:
-                    print(f"ℹ️ {day_str} uchun sotuv yo'q.")
+        else:
+            print(f"ℹ️ {day_str} uchun sotuv yo‘q.")
+
 
         current_process_date += timedelta(days=1)
 
@@ -392,22 +395,21 @@ def update_stock(access_token, engine):
                 day_chunks = []
         
         if day_chunks:
-                    daily_df = pd.concat(day_chunks, ignore_index=True)
-                    
-                    # 1. QADAM: Eski ma'lumotni o'chirishga urinib ko'ramiz (Alohida sessiya)
-                    try:
-                        with engine.begin() as conn:
-                            conn.execute(text(f'DELETE FROM f_qoldiqlar WHERE "Дата" = \'{day_str}\''))
-                    except Exception:
-                        pass # Jadval yo'q bo'lsa, indamaymiz. Sessiya yopildi.
+            daily_df = pd.concat(day_chunks, ignore_index=True)
         
-                    # 2. QADAM: Yangi ma'lumotni yozamiz (Yangi toza sessiya)
-                    try:
-                        with engine.begin() as conn:
-                            daily_df.to_sql("f_qoldiqlar", conn, if_exists="append", index=False)
-                        print(f"✅ {day_str} qoldiq yozildi.")
-                    except Exception as e:
-                        print(f"❌ {day_str} qoldiqni bazaga yozishda xatolik: {e}")
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'''DELETE FROM f_qoldiqlar WHERE "Дата" = '{day_str}' '''))
+            except Exception:
+                pass
+        
+            try:
+                with engine.begin() as conn:
+                    daily_df.to_sql("f_qoldiqlar", conn, if_exists="append", index=False)
+                print(f"✅ {day_str} qoldiq yozildi.")
+            except Exception as e:
+                print(f"❌ {day_str} qoldiqni bazaga yozishda xatolik: {e}")
+
 
         current_process_date += timedelta(days=1)
 

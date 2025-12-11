@@ -521,7 +521,7 @@ def analyze_and_generate_orders(engine):
     
     # Filtrlash (0 va 1 seriyalar)
     df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('0', na=False)]
-    df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('100', na=False)]
+    df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('1', na=False)]
 
     # Max Import Sana hisoblash
     df_analiz['max_import_sana'] = df_analiz.groupby('Артикул')['import_sana'].transform('max')
@@ -556,7 +556,102 @@ def analyze_and_generate_orders(engine):
         lambda row: row['Prodano'] / (row['Дней прошло'] if row['Дней прошло'] > 0 else 1), axis=1
     )
 
+    # SEN XOHLAGAN STRATEGIYA: 1-9 kunliklar -> x7, 10+ kunliklar -> x7
+    df_analiz['kutulyotgan sotuv'] = df_analiz.apply(
+        lambda row: row['o\'rtcha sotuv'] * (7 if row['Дней прошло'] <= 9 else 7),
+        axis=1
+    )
 
+    # --- 4. STATUS TEKSHIRISH ---
+    def calculate_tovar_status(row):
+        tovar_yoshi = row['Дней прошло']
+        sotuv_soni = row['Prodano']
+        qoldiq_soni = row['Hozirgi_Qoldiq']
+        if pd.isna(tovar_yoshi): return "Mos Emas"
+        umumiy_miqdor = sotuv_soni + qoldiq_soni
+        if umumiy_miqdor == 0: return "Mos Emas"
+        sotuv_foizi = (sotuv_soni / umumiy_miqdor) * 100
+
+        if (settings.get('m1_min_days', 0) <= tovar_yoshi <= settings.get('m1_max_days', 0)) and \
+           (sotuv_foizi >= settings.get('m1_percentage', 0)): return "Shart Bajarildi"
+        if (settings.get('m2_min_days', 0) <= tovar_yoshi <= settings.get('m2_max_days', 0)) and \
+           (sotuv_foizi >= settings.get('m2_percentage', 0)): return "Shart Bajarildi"
+        if (settings.get('m3_min_days', 0) <= tovar_yoshi <= settings.get('m3_max_days', 0)) and \
+           (sotuv_foizi >= settings.get('m3_percentage', 0)): return "Shart Bajarildi"
+        if (settings.get('m4_min_days', 0) <= tovar_yoshi <= settings.get('m4_max_days', 0)) and \
+           (sotuv_foizi >= settings.get('m4_percentage', 0)): return "Shart Bajarildi"
+        return "Mos Emas"
+
+    df_analiz['Tovar Statusi'] = df_analiz.apply(calculate_tovar_status, axis=1)
+    hisobot_final = df_analiz[df_analiz['Tovar Statusi'] == "Shart Bajarildi"].copy()
+
+    if hisobot_final.empty:
+        print("✅ Zakazga loyiq tovarlar topilmadi.")
+        return
+
+    # --- 5. POCHKA HISOBLASH ---
+    def dona_to_pochka(dona):
+        dona = float(dona)
+        if dona <= 2: return 0
+        if dona <= 4: return 1
+        if dona <= 10: return 2
+        if dona <= 15: return 3
+        if dona <= 23: return 4
+        if dona <= 29: return 5
+        return math.ceil(dona / 6)
+
+    hisobot_final['quantity'] = hisobot_final['kutulyotgan sotuv'].apply(dona_to_pochka).astype(int)
+    hisobot_final = hisobot_final[hisobot_final['quantity'] > 0].copy()
+
+    if hisobot_final.empty:
+        print("✅ Zakaz soni 0.")
+        return
+
+    # --- 6. BAZAGA YOZISH ---
+    hisobot_final['sana_str'] = hisobot_final['max_import_sana'].dt.strftime('%d.%m.%Y')
+    hisobot_final['color'] = hisobot_final['Цвет'].fillna('N/A').astype(str) + " (" + hisobot_final['sana_str'] + ")"
+
+    rename_map = {
+        'Артикул': 'zakaz_id',
+        'Поставщик': 'supplier',
+        'Категория': 'category',
+        'Подкатегория': 'subcategory',
+        'Магазин': 'shop',
+        'Фото': 'photo',
+        'max_import_sana': 'import_date',
+        'Hozirgi_Qoldiq': 'hozirgi_qoldiq',
+        'Prodano': 'prodano',
+        'Дней прошло': 'days_passed',
+        'o\'rtcha sotuv': 'ortacha_sotuv',
+        'kutulyotgan sotuv': 'kutilyotgan_sotuv',
+        'Tovar Holati': 'tovar_holati',
+        'supply_price': 'supply_price'
+    }
+
+    orders_to_db = hisobot_final.rename(columns=rename_map)
+    orders_to_db['artikul'] = orders_to_db['zakaz_id']
+    orders_to_db['status'] = 'Kutilmoqda'
+    orders_to_db['created_at'] = datetime.now(TASHKENT_TZ).replace(tzinfo=None).date()
+    orders_to_db['import_date'] = pd.to_datetime(orders_to_db['import_date']).dt.date
+
+    target_cols = [
+        'zakaz_id', 'supplier', 'artikul', 'category', 'subcategory', 'shop', 'color', 'photo',
+        'quantity', 'supply_price', 'hozirgi_qoldiq', 'prodano', 'days_passed', 'ortacha_sotuv', 'kutilyotgan_sotuv', 'tovar_holati',
+        'import_date', 'created_at', 'status'
+    ]
+    orders_to_db = orders_to_db[[c for c in target_cols if c in orders_to_db.columns]]
+
+    try:
+        with engine.begin() as conn:
+            print("🧹 Eski 'Kutilmoqda' zakazlari o'chirilmoqda...")
+            conn.execute(text("DELETE FROM generated_orders WHERE status = 'Kutilmoqda'"))
+            orders_to_db.to_sql("generated_orders", conn, if_exists="append", index=False)
+        print(f"✅ BAZA YANGILANDI: {len(orders_to_db)} ta yangi zakaz yozildi.")
+    except Exception as e:
+        print(f"❌ Bazaga yozishda xatolik: {e}")
+
+
+        
     
     # --- 5. POCHKA HISOBLASH ---
     def dona_to_pochka(dona):

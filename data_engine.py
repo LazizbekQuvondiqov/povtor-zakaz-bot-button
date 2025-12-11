@@ -538,33 +538,78 @@ def analyze_and_generate_orders(engine):
     )
 
     # --- ASOSIY MANTIQ ---
+# --- ASOSIY MANTIQ (ADMIN PANELGA BO'YSUNADI) ---
     def calculate_order(row):
         kun = row['days_passed']
         sotuv = row['Prodano']
         qoldiq = row['Hozirgi_Qoldiq']
         avg = row['avg_sales']
         
-        # IMPORT SONI (Do'kon kesimida)
+        # Import sonini topamiz
         import_soni = sotuv + qoldiq
         if import_soni == 0: return 0
         
-        # Sotuv Foizi
+        # Sotuv foizi
         foiz = (sotuv / import_soni) * 100
         
-        # 1. QOIDA: YANGI TOVAR (1-5 kun)
-        if kun <= 5:
-            # Agar 50% dan ko'p sotilgan bo'lsa -> Sotilganini o'zini (x1) qaytar
-            if foiz >= 50:
+        # ----------------------------------------------------
+        # 4-QOIDA (Eng yangi tovarlar)
+        # ----------------------------------------------------
+        # Bu raqamlarni koddan emas, ADMIN PANELDAN oladi:
+        min_kun = float(settings.get('m4_min_days', 1))
+        max_kun = float(settings.get('m4_max_days', 5))
+        kerak_foiz = float(settings.get('m4_percentage', 50))
+        
+        if min_kun <= kun <= max_kun:
+            if foiz >= kerak_foiz:
+                # Yangi tovar talabga javob berdi -> Sotilganini o'zini (x1) qaytar
                 return sotuv * 1.0
             else:
-                return 0
-        
-        # 2. QOIDA: ESKIROQ TOVAR (Standart)
-        # Bu yerda boshqa qoidalaringizni ham qo'shishingiz mumkin
-        # Masalan: 30% dan kam sotilgan bo'lsa zakaz berma va hokazo.
-        
-        return avg * 7  # Standart 1 haftalik zaxira
+                return 0 # Foiz yetmadi
 
+        # ----------------------------------------------------
+        # 3-QOIDA
+        # ----------------------------------------------------
+        min_kun = float(settings.get('m3_min_days', 6))
+        max_kun = float(settings.get('m3_max_days', 9))
+        kerak_foiz = float(settings.get('m3_percentage', 70))
+
+        if min_kun <= kun <= max_kun:
+            if foiz >= kerak_foiz:
+                return avg * 7 # Hafta zaxirasi
+            else:
+                return 0
+
+        # ----------------------------------------------------
+        # 2-QOIDA
+        # ----------------------------------------------------
+        min_kun = float(settings.get('m2_min_days', 10))
+        max_kun = float(settings.get('m2_max_days', 14))
+        kerak_foiz = float(settings.get('m2_percentage', 85))
+
+        if min_kun <= kun <= max_kun:
+            if foiz >= kerak_foiz:
+                return avg * 7
+            else:
+                return 0
+
+        # ----------------------------------------------------
+        # 1-QOIDA (Eng eski/tugab borayotgan tovar)
+        # ----------------------------------------------------
+        min_kun = float(settings.get('m1_min_days', 15))
+        max_kun = float(settings.get('m1_max_days', 1000)) # 1000 kungacha
+        kerak_foiz = float(settings.get('m1_percentage', 99))
+
+        if min_kun <= kun <= max_kun:
+            if foiz >= kerak_foiz:
+                return avg * 7
+            else:
+                return 0
+
+        # ----------------------------------------------------
+        # HECH QAYSI QOIDAGA TUSHMASA
+        # ----------------------------------------------------
+        return 0
     final_df['final_order'] = final_df.apply(calculate_order, axis=1)
     
     # ---------------------------------------------------------

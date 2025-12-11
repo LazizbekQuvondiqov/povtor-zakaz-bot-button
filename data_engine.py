@@ -609,7 +609,7 @@ def analyze_and_generate_orders(engine):
     def to_pochka(dona):
         dona = float(dona)
         if dona <= 2: return 0
-        if dona <= 5: return 1  # 3 dona -> 1 pochka
+        if dona <= 4: return 1  # 3 dona -> 1 pochka
         if dona <= 10: return 2
         if dona <= 15: return 3
         if dona <= 23: return 4

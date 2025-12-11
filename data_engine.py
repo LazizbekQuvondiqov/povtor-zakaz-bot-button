@@ -441,21 +441,20 @@ def update_stock(access_token, engine):
     except Exception as e:
         print(f"⚠️ d_Magazinlar yangilashda xatolik: {e}")
         
+# --- data_engine.py ichidagi analyze_and_generate_orders funksiyasi ---
+
 def analyze_and_generate_orders(engine):
-    print("\n--- 4-QADAM: TAHLIL (MAGAZIN KESIMIDA - STAR SCHEMA) ---")
+    print("\n--- 4-QADAM: TAHLIL (MAGAZIN + ARTIKUL + RANG KESIMIDA) ---")
 
     try:
-        # ---------------------------------------------------------
         # 1. JADVALLARNI O'QISH
-        # ---------------------------------------------------------
-        
         # A) DIMENSION: Mahsulotlar (Unique product_id)
         d_mahsulotlar = pd.read_sql("SELECT * FROM d_mahsulotlar", engine)
         
-        # B) FACT: Sotuvlar (Hamma detallari bilan)
+        # B) FACT: Sotuvlar
         f_sotuvlar = pd.read_sql('SELECT product_id, "Магазин", "Продано за вычетом возвратов" FROM f_sotuvlar', engine)
         
-        # C) FACT: Qoldiqlar (Faqat oxirgi sana bo'yicha - Transfer xatosini kamaytirish uchun)
+        # C) FACT: Qoldiqlar (Faqat oxirgi sana - Snapshot)
         qoldiq_query = """
         SELECT t1.product_id, t1."Магазин", t1."Кол-во"
         FROM f_qoldiqlar t1
@@ -467,11 +466,9 @@ def analyze_and_generate_orders(engine):
         """
         f_qoldiqlar = pd.read_sql(qoldiq_query, engine)
         
-        # Do'kon nomlarini tozalash (probel bo'lsa olib tashlaymiz)
+        # Formatlash
         f_sotuvlar['Магазин'] = f_sotuvlar['Магазин'].astype(str).str.strip()
         f_qoldiqlar['Магазин'] = f_qoldiqlar['Магазин'].astype(str).str.strip()
-
-        # ID larni string qilish (bog'lanish xato bo'lmasligi uchun)
         d_mahsulotlar['product_id'] = d_mahsulotlar['product_id'].astype(str)
         f_sotuvlar['product_id'] = f_sotuvlar['product_id'].astype(str)
         f_qoldiqlar['product_id'] = f_qoldiqlar['product_id'].astype(str)
@@ -482,54 +479,59 @@ def analyze_and_generate_orders(engine):
         print(f"❌ Xatolik: {e}")
         return
 
-    # ---------------------------------------------------------
-    # 2. FAKTLARNI GURUHLASH (ID va MAGAZIN BO'YICHA)
-    # ---------------------------------------------------------
-    
-    # 1. Sotuvni siqamiz: Har bir ID va Do'kon uchun bitta summa
+    # 2. FAKTLARNI BIRLASHTIRISH (ID DARAJANIDA)
     sotuv_grp = f_sotuvlar.groupby(['product_id', 'Магазин'], as_index=False)['Продано за вычетом возвратов'].sum()
     sotuv_grp.rename(columns={'Продано за вычетом возвратов': 'Prodano'}, inplace=True)
     
-    # 2. Qoldiqni siqamiz: Har bir ID va Do'kon uchun bitta summa
     qoldiq_grp = f_qoldiqlar.groupby(['product_id', 'Магазин'], as_index=False)['Кол-во'].sum()
     qoldiq_grp.rename(columns={'Кол-во': 'Hozirgi_Qoldiq'}, inplace=True)
     
-    # ---------------------------------------------------------
-    # 3. BIRLASHTIRISH (FULL OUTER JOIN) - ID va MAGAZIN
-    # ---------------------------------------------------------
-    # Sotuv bor, Qoldiq yo'q -> Kiradi
-    # Qoldiq bor, Sotuv yo'q -> Kiradi
-    
     master_df = pd.merge(sotuv_grp, qoldiq_grp, on=['product_id', 'Магазин'], how='outer')
-    
-    # Null qiymatlarni 0 qilamiz
     master_df.fillna(0, inplace=True)
     
-    # ---------------------------------------------------------
-    # 4. DIMENSION ULASH (YULDUZLI BOG'LANISH)
-    # ---------------------------------------------------------
-    # Endi har bir do'kon qatoriga mahsulot ma'lumotlarini (Rang, Artikul) ulaymiz
-    
+    # 3. MAHSULOT MA'LUMOTLARINI ULASH
     final_df = pd.merge(master_df, d_mahsulotlar, on='product_id', how='left')
-    
-    # Keraksizlarni tozalash (ID bor, lekin d_mahsulotlarda yo'q bo'lsa)
     final_df.dropna(subset=['Артикул'], inplace=True)
 
-    # ---------------------------------------------------------
-    # 5. HISOBLASH (IMPORT SONI = SOTUV + QOLDIQ)
-    # ---------------------------------------------------------
-    
-    # Import sanasini to'g'irlash
+    # Sana formatini to'g'irlash (Guruhlashdan oldin kerak)
     date_col = 'import_date' if 'import_date' in final_df.columns else 'Дата1'
     final_df['import_sana_dt'] = pd.to_datetime(final_df[date_col], errors='coerce', dayfirst=True)
+    # Agar sana yo'q bo'lsa, bugungi kunni qo'yamiz (xatolik bo'lmasligi uchun)
     final_df['import_sana_dt'].fillna(datetime.now(), inplace=True)
     
-    # Eng oxirgi import sanasi (Artikul bo'yicha)
-    final_df['max_import_sana'] = final_df.groupby('Артикул')['import_sana_dt'].transform('max')
+    # Rang bo'sh bo'lsa to'ldiramiz (Guruhlashda yo'qolib qolmasligi uchun)
+    final_df['Цвет'] = final_df['Цвет'].fillna('No Color')
+
+    # -------------------------------------------------------------------------
+    # 🔥🔥🔥 ENG MUHIM O'ZGARISH: GURUHLASH (AGGREGATION) 🔥🔥🔥
+    # Bu yerda biz ID darajasidan -> ARTIKUL+MAGAZIN+RANG darajasiga o'tamiz.
+    # -------------------------------------------------------------------------
     
-    # Kunlar farqi
+    # 1. Qaysi ustun qanday hisoblanishi kerakligini belgilaymiz
+    agg_rules = {
+        'Prodano': 'sum',           # Sotuvlar qo'shiladi (1ta + 0ta = 1ta)
+        'Hozirgi_Qoldiq': 'sum',    # Qoldiqlar qo'shiladi (0ta + 6ta = 6ta)
+        'import_sana_dt': 'max',    # Eng YANGI sana olinadi
+        'supply_price': 'max',      # Narx o'zgarmaydi
+        'Поставщик': 'first',
+        'Категория': 'first',
+        'Подкатегория': 'first',
+        'Фото': 'first'
+    }
+
+    # 2. Guruhlashni bajaramiz
+    grouped_df = final_df.groupby(['Артикул', 'Магазин', 'Цвет'], as_index=False).agg(agg_rules)
+    
+    # 3. Natijani qaytarib final_df ga yuklaymiz (Endi bu yerda dublikat yo'q)
+    final_df = grouped_df
+
+    # -------------------------------------------------------------------------
+    # 4. HISOBLASH VA QOIDALAR (Endi toza ma'lumot ustida ishlaymiz)
+    # -------------------------------------------------------------------------
+
+    # Kunlar farqini hisoblash (MAX sana bo'yicha)
     max_sana_kalendar = datetime.now(TASHKENT_TZ).replace(tzinfo=None)
-    final_df['days_passed'] = (max_sana_kalendar - final_df['max_import_sana']).dt.days
+    final_df['days_passed'] = (max_sana_kalendar - final_df['import_sana_dt']).dt.days
     final_df['days_passed'] = final_df['days_passed'].clip(lower=0)
 
     # O'rtacha sotuv
@@ -537,92 +539,45 @@ def analyze_and_generate_orders(engine):
         lambda row: row['Prodano'] / (row['days_passed'] if row['days_passed'] > 0 else 1), axis=1
     )
 
-    # --- ASOSIY MANTIQ ---
-# --- ASOSIY MANTIQ (ADMIN PANELGA BO'YSUNADI) ---
     def calculate_order(row):
         kun = row['days_passed']
         sotuv = row['Prodano']
         qoldiq = row['Hozirgi_Qoldiq']
         avg = row['avg_sales']
         
-        # Import sonini topamiz
+        # Import soni (Endi bu yerda hamma IDlar yig'indisi turibdi)
         import_soni = sotuv + qoldiq
         if import_soni == 0: return 0
         
-        # Sotuv foizi
         foiz = (sotuv / import_soni) * 100
         
-        # ----------------------------------------------------
-        # 4-QOIDA (Eng yangi tovarlar)
-        # ----------------------------------------------------
-        # Bu raqamlarni koddan emas, ADMIN PANELDAN oladi:
-        min_kun = float(settings.get('m4_min_days', 1))
-        max_kun = float(settings.get('m4_max_days', 5))
-        kerak_foiz = float(settings.get('m4_percentage', 50))
+        # --- QOIDALAR (ADMIN SOZLAMALARI) ---
         
-        if min_kun <= kun <= max_kun:
-            if foiz >= kerak_foiz:
-                # Yangi tovar talabga javob berdi -> Sotilganini o'zini (x1) qaytar
-                return sotuv * 1.0
-            else:
-                return 0 # Foiz yetmadi
+        # 4-QOIDA (1-5 kun, Yangi)
+        if settings.get('m4_min_days', 1) <= kun <= settings.get('m4_max_days', 5):
+            if foiz >= settings.get('m4_percentage', 50):
+                return sotuv * 1.0 
 
-        # ----------------------------------------------------
-        # 3-QOIDA
-        # ----------------------------------------------------
-        min_kun = float(settings.get('m3_min_days', 6))
-        max_kun = float(settings.get('m3_max_days', 9))
-        kerak_foiz = float(settings.get('m3_percentage', 70))
+        # 3-QOIDA (6-9 kun)
+        if settings.get('m3_min_days', 6) <= kun <= settings.get('m3_max_days', 9):
+            if foiz >= settings.get('m3_percentage', 70):
+                return avg * 7 
 
-        if min_kun <= kun <= max_kun:
-            if foiz >= kerak_foiz:
-                return avg * 7 # Hafta zaxirasi
-            else:
-                return 0
-
-        # ----------------------------------------------------
-        # 2-QOIDA
-        # ----------------------------------------------------
-        min_kun = float(settings.get('m2_min_days', 10))
-        max_kun = float(settings.get('m2_max_days', 14))
-        kerak_foiz = float(settings.get('m2_percentage', 85))
-
-        if min_kun <= kun <= max_kun:
-            if foiz >= kerak_foiz:
+        # 2-QOIDA (10-14 kun)
+        if settings.get('m2_min_days', 10) <= kun <= settings.get('m2_max_days', 14):
+            if foiz >= settings.get('m2_percentage', 85):
                 return avg * 7
-            else:
-                return 0
 
-        # ----------------------------------------------------
-        # 1-QOIDA (Eng eski/tugab borayotgan tovar)
-        # ----------------------------------------------------
-        min_kun = float(settings.get('m1_min_days', 15))
-        max_kun = float(settings.get('m1_max_days', 1000)) # 1000 kungacha
-        kerak_foiz = float(settings.get('m1_percentage', 99))
-
-        if min_kun <= kun <= max_kun:
-            if foiz >= kerak_foiz:
+        # 1-QOIDA (15+ kun, Eski)
+        if settings.get('m1_min_days', 15) <= kun <= settings.get('m1_max_days', 1000):
+            if foiz >= settings.get('m1_percentage', 99):
                 return avg * 7
-            else:
-                return 0
 
-        # ----------------------------------------------------
-        # HECH QAYSI QOIDAGA TUSHMASA
-        # ----------------------------------------------------
         return 0
+
     final_df['final_order'] = final_df.apply(calculate_order, axis=1)
     
-    # ---------------------------------------------------------
-    # 6. BAZAGA YOZISH
-    # ---------------------------------------------------------
-    
-    orders = final_df[final_df['final_order'] > 0].copy()
-    
-    if orders.empty:
-        print("✅ Zakaz yo'q.")
-        return
-
-    # --- ⚠️ TUZATISH: MANA BU FUNKSIYANI SHU YERGA YOZING ---
+    # 5. POCHKA HISOBLASH (Ichki funksiya)
     def to_pochka(dona):
         dona = float(dona)
         if dona <= 2: return 0
@@ -632,21 +587,23 @@ def analyze_and_generate_orders(engine):
         if dona <= 23: return 4
         if dona <= 29: return 5
         return math.ceil(dona / 6)
-    # -------------------------------------------------------
 
-    # Keyin ishlatamiz (Endi xato bermaydi)
+    orders = final_df[final_df['final_order'] > 0].copy()
+    
+    if orders.empty:
+        print("✅ Zakaz yo'q.")
+        return
+
+    # Pochkaga o'tkazish
     orders['quantity'] = orders['final_order'].apply(to_pochka).astype(int)
     orders = orders[orders['quantity'] > 0].copy()
 
     # Rang va Sana formatlash
-    orders['sana_str'] = orders['max_import_sana'].dt.strftime('%d.%m.%Y')
-    orders['color'] = orders['Цвет'].fillna('No Color').astype(str) + " (" + orders['sana_str'] + ")"
-    
-    # Status tekshirish (Filtr uchun)
-    # Bu yerda oddiy "Shart Bajarildi" deb ketamiz, chunki tepadagi funksiyada hisoblab bo'ldik
+    orders['sana_str'] = orders['import_sana_dt'].dt.strftime('%d.%m.%Y')
+    orders['color'] = orders['Цвет'].astype(str) + " (" + orders['sana_str'] + ")"
     orders['tovar_holati'] = "Shart Bajarildi"
 
-    # Ustunlarni nomlash
+    # Ustunlarni nomlash va DB ga yozish
     rename_map = {
         'Артикул': 'zakaz_id',
         'Поставщик': 'supplier',
@@ -654,7 +611,7 @@ def analyze_and_generate_orders(engine):
         'Подкатегория': 'subcategory',
         'Магазин': 'shop',
         'Фото': 'photo',
-        'max_import_sana': 'import_date',
+        'import_sana_dt': 'import_date',
         'Hozirgi_Qoldiq': 'hozirgi_qoldiq',
         'Prodano': 'prodano',
         'days_passed': 'days_passed',
@@ -669,7 +626,6 @@ def analyze_and_generate_orders(engine):
     orders_db['created_at'] = datetime.now(TASHKENT_TZ).replace(tzinfo=None).date()
     orders_db['import_date'] = pd.to_datetime(orders_db['import_date']).dt.date
 
-    # Kerakli ustunlarni tanlab olish
     cols = [
         'zakaz_id', 'supplier', 'artikul', 'category', 'subcategory', 'shop', 'color', 'photo',
         'quantity', 'supply_price', 'hozirgi_qoldiq', 'prodano', 'days_passed', 
@@ -681,23 +637,9 @@ def analyze_and_generate_orders(engine):
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM generated_orders WHERE status = 'Kutilmoqda'"))
             orders_db.to_sql("generated_orders", conn, if_exists="append", index=False)
-        print(f"✅ BAZA YANGILANDI: {len(orders_db)} ta qator yozildi.")
+        print(f"✅ BAZA YANGILANDI: {len(orders_db)} ta unikal guruhlangan zakaz yozildi.")
     except Exception as e:
-        print(f"❌ Yozishda xatolik: {e}")
-
-    # --- 5. POCHKA HISOBLASH ---
-    # def dona_to_pochka(dona):
-    #     dona = float(dona)
-    #     if dona <= 2: return 0
-    #     if dona <= 4: return 1
-    #     if dona <= 10: return 2
-    #     if dona <= 15: return 3
-    #     if dona <= 23: return 4
-    #     if dona <= 29: return 5
-    #     return math.ceil(dona / 6)
-
-
-        
+        print(f"❌ Yozishda xatolik: {e}")    
    
 
 def run_full_update():

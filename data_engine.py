@@ -442,6 +442,21 @@ def update_stock(access_token, engine):
         print(f"⚠️ d_Magazinlar yangilashda xatolik: {e}")
         
 def analyze_and_generate_orders(engine):
+    # --- TEZKOR TUZATISH (USTUN QO'SHISH) ---
+    try:
+        with engine.begin() as conn:
+            # f_sotuvlar uchun
+            conn.execute(text('ALTER TABLE f_sotuvlar ADD COLUMN IF NOT EXISTS "ProductShop_Key" TEXT'))
+            conn.execute(text('UPDATE f_sotuvlar SET "ProductShop_Key" = product_id || \'_\' || "Магазин" WHERE "ProductShop_Key" IS NULL'))
+            
+            # f_qoldiqlar uchun
+            conn.execute(text('ALTER TABLE f_qoldiqlar ADD COLUMN IF NOT EXISTS "ProductShop_Key" TEXT'))
+            conn.execute(text('UPDATE f_qoldiqlar SET "ProductShop_Key" = product_id || \'_\' || "Магазин" WHERE "ProductShop_Key" IS NULL'))
+        print("✅ Ustunlar tekshirildi va tuzatildi.")
+    except Exception as e:
+        print(f"⚠️ Ustun tuzatishda ogohlantirish (xavfli emas): {e}")
+    # ----------------------------------------
+
     print("\n--- 4-QADAM: TAHLIL (YANGI MANTIQ: UNIKAL MAHSULOTLAR) ---")
 
     try:
@@ -506,7 +521,7 @@ def analyze_and_generate_orders(engine):
     
     # Filtrlash (0 va 1 seriyalar)
     df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('0', na=False)]
-    df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('1', na=False)]
+    df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('100', na=False)]
 
     # Max Import Sana hisoblash
     df_analiz['max_import_sana'] = df_analiz.groupby('Артикул')['import_sana'].transform('max')
@@ -541,39 +556,8 @@ def analyze_and_generate_orders(engine):
         lambda row: row['Prodano'] / (row['Дней прошло'] if row['Дней прошло'] > 0 else 1), axis=1
     )
 
-  
-    df_analiz['kutulyotgan sotuv'] = df_analiz.apply(
-        lambda row: row['o\'rtcha sotuv'] * (7 if row['Дней прошло'] <= 9 else 7),
-        axis=1
-    )
 
-    # --- 4. STATUS TEKSHIRISH ---
-    def calculate_tovar_status(row):
-        tovar_yoshi = row['Дней прошло']
-        sotuv_soni = row['Prodano']
-        qoldiq_soni = row['Hozirgi_Qoldiq']
-        if pd.isna(tovar_yoshi): return "Mos Emas"
-        umumiy_miqdor = sotuv_soni + qoldiq_soni
-        if umumiy_miqdor == 0: return "Mos Emas"
-        sotuv_foizi = (sotuv_soni / umumiy_miqdor) * 100
-
-        if (settings.get('m1_min_days', 0) <= tovar_yoshi <= settings.get('m1_max_days', 0)) and \
-           (sotuv_foizi >= settings.get('m1_percentage', 0)): return "Shart Bajarildi"
-        if (settings.get('m2_min_days', 0) <= tovar_yoshi <= settings.get('m2_max_days', 0)) and \
-           (sotuv_foizi >= settings.get('m2_percentage', 0)): return "Shart Bajarildi"
-        if (settings.get('m3_min_days', 0) <= tovar_yoshi <= settings.get('m3_max_days', 0)) and \
-           (sotuv_foizi >= settings.get('m3_percentage', 0)): return "Shart Bajarildi"
-        if (settings.get('m4_min_days', 0) <= tovar_yoshi <= settings.get('m4_max_days', 0)) and \
-           (sotuv_foizi >= settings.get('m4_percentage', 0)): return "Shart Bajarildi"
-        return "Mos Emas"
-
-    df_analiz['Tovar Statusi'] = df_analiz.apply(calculate_tovar_status, axis=1)
-    hisobot_final = df_analiz[df_analiz['Tovar Statusi'] == "Shart Bajarildi"].copy()
-
-    if hisobot_final.empty:
-        print("✅ Zakazga loyiq tovarlar topilmadi.")
-        return
-
+    
     # --- 5. POCHKA HISOBLASH ---
     def dona_to_pochka(dona):
         dona = float(dona)

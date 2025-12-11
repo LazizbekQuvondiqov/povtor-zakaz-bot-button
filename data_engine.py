@@ -656,68 +656,7 @@ def analyze_and_generate_orders(engine):
 
 
         
-    
-    # --- 5. POCHKA HISOBLASH ---
-    def dona_to_pochka(dona):
-        dona = float(dona)
-        if dona <= 2: return 0
-        if dona <= 4: return 1
-        if dona <= 10: return 2
-        if dona <= 15: return 3
-        if dona <= 23: return 4
-        if dona <= 29: return 5
-        return math.ceil(dona / 6)
-
-    hisobot_final['quantity'] = hisobot_final['kutulyotgan sotuv'].apply(dona_to_pochka).astype(int)
-    hisobot_final = hisobot_final[hisobot_final['quantity'] > 0].copy()
-
-    if hisobot_final.empty:
-        print("✅ Zakaz soni 0.")
-        return
-
-    # --- 6. BAZAGA YOZISH ---
-    hisobot_final['sana_str'] = hisobot_final['max_import_sana'].dt.strftime('%d.%m.%Y')
-    hisobot_final['color'] = hisobot_final['Цвет'].fillna('N/A').astype(str) + " (" + hisobot_final['sana_str'] + ")"
-
-    rename_map = {
-        'Артикул': 'zakaz_id',
-        'Поставщик': 'supplier',
-        'Категория': 'category',
-        'Подкатегория': 'subcategory',
-        'Магазин': 'shop',
-        'Фото': 'photo',
-        'max_import_sana': 'import_date',
-        'Hozirgi_Qoldiq': 'hozirgi_qoldiq',
-        'Prodano': 'prodano',
-        'Дней прошло': 'days_passed',
-        'o\'rtcha sotuv': 'ortacha_sotuv',
-        'kutulyotgan sotuv': 'kutilyotgan_sotuv',
-        'Tovar Holati': 'tovar_holati',
-        'supply_price': 'supply_price'
-    }
-
-    orders_to_db = hisobot_final.rename(columns=rename_map)
-    orders_to_db['artikul'] = orders_to_db['zakaz_id']
-    orders_to_db['status'] = 'Kutilmoqda'
-    orders_to_db['created_at'] = datetime.now(TASHKENT_TZ).replace(tzinfo=None).date()
-    orders_to_db['import_date'] = pd.to_datetime(orders_to_db['import_date']).dt.date
-
-    target_cols = [
-        'zakaz_id', 'supplier', 'artikul', 'category', 'subcategory', 'shop', 'color', 'photo',
-        'quantity', 'supply_price', 'hozirgi_qoldiq', 'prodano', 'days_passed', 'ortacha_sotuv', 'kutilyotgan_sotuv', 'tovar_holati',
-        'import_date', 'created_at', 'status'
-    ]
-    orders_to_db = orders_to_db[[c for c in target_cols if c in orders_to_db.columns]]
-
-    try:
-        with engine.begin() as conn:
-            print("🧹 Eski 'Kutilmoqda' zakazlari o'chirilmoqda...")
-            conn.execute(text("DELETE FROM generated_orders WHERE status = 'Kutilmoqda'"))
-            orders_to_db.to_sql("generated_orders", conn, if_exists="append", index=False)
-        print(f"✅ BAZA YANGILANDI: {len(orders_to_db)} ta yangi zakaz yozildi.")
-    except Exception as e:
-        print(f"❌ Bazaga yozishda xatolik: {e}")
-
+   
 
 def run_full_update():
     """

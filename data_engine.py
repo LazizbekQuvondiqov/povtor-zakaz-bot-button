@@ -521,7 +521,7 @@ def analyze_and_generate_orders(engine):
     
     # Filtrlash (0 va 1 seriyalar)
     df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('0', na=False)]
-    df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('1', na=False)]
+    df_analiz = df_analiz[~df_analiz['Артикул'].astype(str).str.startswith('100', na=False)]
 
     # Max Import Sana hisoblash
     df_analiz['max_import_sana'] = df_analiz.groupby('Артикул')['import_sana'].transform('max')

@@ -571,15 +571,14 @@ def analyze_and_generate_orders(engine):
     # 6. BAZAGA YOZISH
     # ---------------------------------------------------------
     
-    # Faqat zakaz > 0 bo'lganlarni olamiz
     orders = final_df[final_df['final_order'] > 0].copy()
     
     if orders.empty:
         print("✅ Zakaz yo'q.")
         return
 
-    # Pochka hisoblash
-    def dona_to_pochka(dona):
+    # --- ⚠️ TUZATISH: MANA BU FUNKSIYANI SHU YERGA YOZING ---
+    def to_pochka(dona):
         dona = float(dona)
         if dona <= 2: return 0
         if dona <= 4: return 1
@@ -588,21 +587,9 @@ def analyze_and_generate_orders(engine):
         if dona <= 23: return 4
         if dona <= 29: return 5
         return math.ceil(dona / 6)
+    # -------------------------------------------------------
 
-
-    # --- 5. POCHKA HISOBLASH ---
-    # def dona_to_pochka(dona):
-    #     dona = float(dona)
-    #     if dona <= 2: return 0
-    #     if dona <= 4: return 1
-    #     if dona <= 10: return 2
-    #     if dona <= 15: return 3
-    #     if dona <= 23: return 4
-    #     if dona <= 29: return 5
-    #     return math.ceil(dona / 6)
-
-
-    
+    # Keyin ishlatamiz (Endi xato bermaydi)
     orders['quantity'] = orders['final_order'].apply(to_pochka).astype(int)
     orders = orders[orders['quantity'] > 0].copy()
 

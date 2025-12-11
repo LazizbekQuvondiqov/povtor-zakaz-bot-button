@@ -392,7 +392,11 @@ def update_stock(access_token, engine):
             daily_df = pd.concat(day_chunks, ignore_index=True)
             try:
                 with engine.begin() as conn:
-                    conn.execute(text(f'DELETE FROM f_qoldiqlar WHERE "Дата" = \'{day_str}\''))
+                    try:
+                        conn.execute(text(f'DELETE FROM f_qoldiqlar WHERE "Дата" = \'{day_str}\''))
+                    except Exception:
+                        pass
+                    
                     daily_df.to_sql("f_qoldiqlar", conn, if_exists="append", index=False)
                 print(f"✅ {day_str} qoldiq yozildi.")
             except Exception as e:

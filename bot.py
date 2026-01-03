@@ -396,10 +396,21 @@ async def process_change(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data.startswith("feedback:"))
 async def feedback_handler(callback: CallbackQuery):
     _, status, zakaz_id = callback.data.split(":")
+    
+    # 1. Bazada statusni yangilaymiz
     if db_manager.update_order_status(zakaz_id, status):
+        
+        # 2. Xabarni o'zgartirish (eski logika)
         icon = "✅" if status == "Topdim" else "❌"
-        txt = callback.message.caption or callback.message.text
-        new_txt = txt + f"\n\n<b>Javob: {icon} {status}</b>"
+        # Caption yoki Text borligini tekshiramiz
+        old_caption = callback.message.caption or callback.message.text or ""
+        
+        # Agar oldin javob yozilmagan bo'lsa, javobni qo'shamiz
+        if "Javob:" not in old_caption:
+            new_txt = old_caption + f"\n\n<b>Javob: {icon} {status}</b>"
+        else:
+            new_txt = old_caption # Qayta bosilganda matn buzilmasligi uchun
+            
         try:
             if callback.message.photo:
                 await callback.message.edit_caption(caption=new_txt, reply_markup=None)
@@ -407,9 +418,27 @@ async def feedback_handler(callback: CallbackQuery):
                 await callback.message.edit_text(new_txt, reply_markup=None)
         except TelegramBadRequest:
             await callback.message.edit_reply_markup(reply_markup=None)
-    else:
-        await callback.answer("❌ Xatolik", show_alert=True)
 
+        # --- YANGI QO'SHILGAN QISM: KANALGA YUBORISH ---
+        if status == "Topdim":
+            try:
+                # Kim tasdiqlaganini bilish uchun (ixtiyoriy)
+                user_info = f"\n\n👤 <b>Tasdiqladi:</b> {callback.from_user.full_name}"
+                channel_caption = old_caption + user_info
+
+                if callback.message.photo:
+                    # Rasmli xabar bo'lsa
+                    photo_id = callback.message.photo[-1].file_id
+                    await bot.send_photo(chat_id=config.ARCHIVE_CHANNEL_ID, photo=photo_id, caption=channel_caption)
+                else:
+                    # Faqat matnli xabar bo'lsa
+                    await bot.send_message(chat_id=config.ARCHIVE_CHANNEL_ID, text=channel_caption)
+            except Exception as e:
+                print(f"❌ Kanalga yuborishda xatolik: {e}")
+        # -----------------------------------------------
+
+    else:
+        await callback.answer("❌ Xatolik yoki bu zakaz allaqachon o'zgargan", show_alert=True)
 # --- SOZLAMALAR CALLBACKLARI ---
 @dp.callback_query(F.data.startswith("edit_rule_"))
 async def edit_rule(callback: CallbackQuery, state: FSMContext):

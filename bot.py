@@ -810,6 +810,8 @@ async def imp_cat_click(callback: CallbackQuery):
     )
 
 # 3. Podkategoriya tanlanganda -> KARTOCHKALAR CHIQADI
+# --- BOT.PY ---
+
 @dp.callback_query(F.data.startswith("impSub_"))
 async def imp_sub_click(callback: CallbackQuery):
     uid = callback.data.split("_")[1]
@@ -818,7 +820,7 @@ async def imp_sub_click(callback: CallbackQuery):
     
     mn, mx, cat, sub = data
     
-    # 1. Bazadan DataFrame olamiz (Global ro'yxat)
+    # 1. Bazadan ma'lumot olamiz
     orders_df = await asyncio.to_thread(db_manager.get_import_orders_detailed, mn, mx, cat, sub)
     
     if orders_df.empty:
@@ -839,6 +841,13 @@ async def imp_sub_click(callback: CallbackQuery):
         except:
             price_str = "0"
 
+        # --- O'ZGARISH: TUGMALAR QO'SHILDI ---
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Topdim", callback_data=f"feedback:Topdim:{article}"),
+             InlineKeyboardButton(text="❌ Topilmadi", callback_data=f"feedback:Topilmadi:{article}")]
+        ])
+        # -------------------------------------
+
         # Matn: Supplier nomi va Umumiy ma'lumot
         caption = f"📦 <b>{article}</b>\n"
         caption += f"👤 Postavchik: <b>{first.get('supplier', 'Noma\'lum')}</b>\n"
@@ -858,19 +867,22 @@ async def imp_sub_click(callback: CallbackQuery):
             if photo.startswith('http'):
                 if len(caption) > 1024:
                     await bot.send_photo(callback.message.chat.id, photo)
-                    await bot.send_message(callback.message.chat.id, caption)
+                    # Matn alohida ketganda tugmani matnga ulaymiz
+                    await bot.send_message(callback.message.chat.id, caption, reply_markup=keyboard)
                 else:
-                    await bot.send_photo(callback.message.chat.id, photo, caption=caption)
+                    # Rasm bilan birga tugma
+                    await bot.send_photo(callback.message.chat.id, photo, caption=caption, reply_markup=keyboard)
             else:
-                await bot.send_message(callback.message.chat.id, caption)
+                # Faqat matn bo'lsa
+                await bot.send_message(callback.message.chat.id, caption, reply_markup=keyboard)
         except Exception:
-            await bot.send_message(callback.message.chat.id, caption)
+            await bot.send_message(callback.message.chat.id, caption, reply_markup=keyboard)
         
         await asyncio.sleep(0.3)
 
+    # Ro'yxat tugagach chiqadigan menyu
     kb = [[InlineKeyboardButton(text="🔄 Boshqa bo'lim", callback_data="impBack_root")]]
     await bot.send_message(callback.message.chat.id, "✅ Ro'yxat tugadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-
 @dp.callback_query(F.data == "impBack_root")
 async def imp_back_root(callback: CallbackQuery):
     await import_analysis_start(callback.message)

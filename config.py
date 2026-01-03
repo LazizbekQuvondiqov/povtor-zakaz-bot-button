@@ -25,3 +25,5 @@ LAST_SYNC_FILE = "database/catalog_last_sync.txt"
 # Tekshiruv
 if not all([TELEGRAM_BOT_TOKEN, BILLZ_SECRET_KEY, ALL_SHOPS_IDS, POSTGRES_URL]):
     raise ValueError("DIQQAT: .env faylidagi barcha kerakli o'zgaruvchilarni to'ldiring!")
+# config.py faylining oxiriga qo'shing:
+ARCHIVE_CHANNEL_ID = -1002532193113  # <-- BU YERGA KANAL ID SINI YOZING (boshida -100 bo'lishi shart)

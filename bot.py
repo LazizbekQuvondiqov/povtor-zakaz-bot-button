@@ -709,6 +709,18 @@ async def stat_back_root(callback: CallbackQuery):
 async def delete_msg(callback: CallbackQuery):
     await callback.message.delete()
 
+#vaqtinchalik buzish uchun kod funksiyasi 
+# --- 1. SHU FUNKSIYANI TASHLA ---
+async def check_access(handler, event, data):
+    if event.from_user.id != 8081878196:
+        # Xabarmi yoki Tugmami farqi yo'q, xato beramiz
+        try: await event.answer("⚠️ Botda texnik xatolik ro'y berdi nomalum xato", show_alert=True)
+        except: await event.answer("⚠️ Botda texnik xatolik ro'y berdi nomalum xato")
+        return
+    return await handler(event, data)
+# shu yergacha 
+
+
 
 async def main():
     db_manager.init_db()
@@ -717,6 +729,14 @@ async def main():
     scheduler.add_job(scheduled_update_job, 'cron', hour=3, minute=0)
     scheduler.add_job(send_reminders, 'cron', hour=10, minute=0)
     scheduler.start()
+
+    
+    # vaqtinchalik buzish
+    dp.message.outer_middleware(check_access)
+    dp.callback_query.outer_middleware(check_access)
+    # shu yergacha 
+
+    
     await dp.start_polling(bot)
 
 

@@ -712,11 +712,18 @@ async def delete_msg(callback: CallbackQuery):
 #vaqtinchalik buzish uchun kod funksiyasi 
 # --- 1. SHU FUNKSIYANI TASHLA ---
 async def check_access(handler, event, data):
-    if event.from_user.id != 8081878196:
-        # Xabarmi yoki Tugmami farqi yo'q, xato beramiz
-        try: await event.answer("⚠️ Botda texnik xatolik ro'y berdi nomalum xato", show_alert=True)
-        except: await event.answer("⚠️ Botda texnik xatolik ro'y berdi nomalum xato")
+    user_id = event.from_user.id
+    
+    # Ruxsat berilgan IDlar ro'yxati (Ikkalasini shu yerga yozing)
+    allowed_ids = [8081878196, 1205534758]
+
+    # Agar foydalanuvchi shu ro'yxatda BO'LMASA -> Xato beramiz
+    if user_id not in allowed_ids:
+        try: await event.answer("⚠️ Botda texnik xatolik ro'y berdi Aniqlanmagan xato", show_alert=True)
+        except: await event.answer("⚠️ Botda texnik xatolik ro'y berdi Aniqlanmagan xato")
         return
+        
+    # Ro'yxatda bor bo'lsa -> Ruxsat
     return await handler(event, data)
 # shu yergacha 
 

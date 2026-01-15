@@ -385,6 +385,52 @@ async def my_orders_text(message: types.Message):
                 await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
             await asyncio.sleep(0.3)
 
+@dp.message(F.text == "⏳ Jarayonda")
+async def pending_orders_text(message: types.Message):
+    supplier = db_manager.get_supplier_by_id(message.from_user.id)
+    if not supplier: return
+
+    msg = await message.answer("⏳ Yuklanmoqda...")
+    orders_df = await get_orders_for_supplier(supplier.name)
+    
+    # Faqat 'Topdim' statusi
+    pending = orders_df[orders_df['status'] == 'Topdim'].copy()
+    
+    if pending.empty:
+        await msg.edit_text("✅ Jarayonda hech narsa yo'q.")
+        return
+
+    # Qizillarni (3 kundan oshgan) chiqarib tashlaymiz (Ular Yangi bo'limida chiqadi)
+    pending['created_at_dt'] = pd.to_datetime(pending['created_at'])
+    now = datetime.now()
+    mask_normal = (now - pending['created_at_dt']).dt.days < 3
+    normal_pending = pending[mask_normal].copy()
+
+    await msg.delete()
+
+    if normal_pending.empty:
+        await message.answer("✅ Hozircha tinchlik. (Eski zakazlar yo'q yoki ular kechikib 'Qizil'ga o'tgan).")
+        return
+
+    grouped = normal_pending.groupby('artikul')
+    await message.answer(f"⏳ <b>JARAYONDA ({len(grouped)} ta):</b>\n<i>Skladga kirim kutilmoqda...</i>")
+
+    for article, group in grouped:
+        first = group.iloc[0]
+        # Tugma: Faqat Bekor qilish
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"cancel_order:{article}")]
+        ])
+        
+        caption = f"🟡 <b>{article}</b> (Yo'lda)\n"
+        for shop, s_group in group.groupby('shop'):
+            caption += f"\n🏪 <b>{shop}:</b>"
+            for _, row in s_group.iterrows():
+                caption += f"\n  - {row.get('color','-')}: <b>{row.get('quantity',0)} pochka</b>"
+
+        await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
+        await asyncio.sleep(0.2)
+
 @dp.message(F.text == "📝 Ismni o'zgartirish")
 async def change_name_text(message: types.Message, state: FSMContext):
     # 1-qadam: Mavjud bo'sh kategoriyalarni olish

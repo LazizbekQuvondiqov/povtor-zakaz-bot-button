@@ -439,52 +439,69 @@ async def process_change(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("❌ Xatolik.")
     await state.clear()
 
+# --- BEKOR QILISH TUGMASI ---
+@dp.callback_query(F.data.startswith("cancel_order:"))
+async def cancel_order_handler(callback: CallbackQuery):
+    artikul = callback.data.split(":")[1]
+    
+    # Tasdiqlash so'raymiz
+    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Ha, Bekor qilish", callback_data=f"confirm_cancel:{artikul}"),
+         InlineKeyboardButton(text="Yo'q, Qaytish", callback_data="del_msg")]
+    ])
+    await callback.message.answer(f"⚠️ <b>{artikul}</b> ni 'Kutilmoqda' ro'yxatidan o'chirib tashlamoqchimisiz?\n(Keyingi safar yana Yangi bo'lib chiqadi)", reply_markup=confirm_kb)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("confirm_cancel:"))
+async def confirm_cancel_handler(callback: CallbackQuery):
+    artikul = callback.data.split(":")[1]
+    supplier = db_manager.get_supplier_by_id(callback.from_user.id)
+    
+    # Bazadan o'chirish (Status='Topdim' bo'lganlarni)
+    # db_manager ga yangi funksiya yozish shart emas, shu yerdan SQL chaqirsak ham bo'ladi, 
+    # lekin to'g'risi db_manager.cancel_order funksiyasini ishlatish.
+    # Hozircha oddiy query bilan qilamiz:
+    
+    try:
+        from sqlalchemy import text
+        with db_manager.engine.begin() as conn:
+            conn.execute(text(f"DELETE FROM generated_orders WHERE artikul = '{artikul}' AND supplier = '{supplier.name}' AND status = 'Topdim'"))
+        
+        await callback.message.edit_text(f"✅ <b>{artikul}</b> bekor qilindi.")
+    except Exception as e:
+        await callback.message.edit_text(f"❌ Xatolik: {e}")
+
+# --- FEEDBACK HANDLER (Eski, lekin yangilangan) ---
 @dp.callback_query(F.data.startswith("feedback:"))
 async def feedback_handler(callback: CallbackQuery):
-    _, status, zakaz_id = callback.data.split(":")
+    _, status, artikul = callback.data.split(":")
     
-    # 1. Bazada statusni yangilaymiz
-    if db_manager.update_order_status(zakaz_id, status):
-        
-        # 2. Xabarni o'zgartirish (eski logika)
-        icon = "✅" if status == "Topdim" else "❌"
-        # Caption yoki Text borligini tekshiramiz
-        old_caption = callback.message.caption or callback.message.text or ""
-        
-        # Agar oldin javob yozilmagan bo'lsa, javobni qo'shamiz
-        if "Javob:" not in old_caption:
-            new_txt = old_caption + f"\n\n<b>Javob: {icon} {status}</b>"
-        else:
-            new_txt = old_caption # Qayta bosilganda matn buzilmasligi uchun
+    # Status yangilash
+    # Agar 'Topdim' bo'lsa -> Status='Topdim' ga o'tadi (Sariq bo'ladi)
+    # Agar 'Topilmadi' bo'lsa -> O'chiriladi yoki shunday qoladi (Sizning xohishingiz)
+    # Odatda 'Topilmadi' desa, ertaga yana chiqishi kerak. Shuning uchun o'chirish ma'qul.
+    
+    new_db_status = 'Topdim' if status == 'Topdim' else 'Topilmadi'
+    
+    if new_db_status == 'Topdim':
+        if db_manager.update_order_status(artikul, 'Topdim'):
+             # Xabarni o'zgartirish
+            await callback.message.edit_text(f"✅ <b>{artikul}</b> 'Kutilmoqda' ro'yxatiga o'tkazildi.", reply_markup=None)
             
-        try:
-            if callback.message.photo:
-                await callback.message.edit_caption(caption=new_txt, reply_markup=None)
-            else:
-                await callback.message.edit_text(new_txt, reply_markup=None)
-        except TelegramBadRequest:
-            await callback.message.edit_reply_markup(reply_markup=None)
-
-        # --- YANGI QO'SHILGAN QISM: KANALGA YUBORISH ---
-        if status == "Topdim":
+            # Kanalga yuborish (Eski funksiyangizdagi kod)
             try:
-                # Kim tasdiqlaganini bilish uchun (ixtiyoriy)
-                user_info = f"\n\n👤 <b>Tasdiqladi:</b> {callback.from_user.full_name}"
-                channel_caption = old_caption + user_info
-
                 if callback.message.photo:
-                    # Rasmli xabar bo'lsa
                     photo_id = callback.message.photo[-1].file_id
-                    await bot.send_photo(chat_id=config.ARCHIVE_CHANNEL_ID, photo=photo_id, caption=channel_caption)
+                    await bot.send_photo(chat_id=config.ARCHIVE_CHANNEL_ID, photo=photo_id, caption=f"✅ Topildi: {artikul}\n👤 {callback.from_user.full_name}")
                 else:
-                    # Faqat matnli xabar bo'lsa
-                    await bot.send_message(chat_id=config.ARCHIVE_CHANNEL_ID, text=channel_caption)
-            except Exception as e:
-                print(f"❌ Kanalga yuborishda xatolik: {e}")
-        # -----------------------------------------------
-
+                    await bot.send_message(chat_id=config.ARCHIVE_CHANNEL_ID, text=f"✅ Topildi: {artikul}\n👤 {callback.from_user.full_name}")
+            except: pass
+            
     else:
-        await callback.answer("❌ Xatolik yoki bu zakaz allaqachon o'zgargan", show_alert=True)
+        # Topilmadi -> Demak o'chirib turamiz, ertaga yana 'Yangi' bo'lib chiqadi
+        # Yoki shunchaki xabarni o'chirib qo'yamiz.
+        await callback.message.delete()
+        await callback.answer("❌ Tushunarli, topilmadi.", show_alert=True)
 # --- SOZLAMALAR CALLBACKLARI ---
 @dp.callback_query(F.data.startswith("edit_rule_"))
 async def edit_rule(callback: CallbackQuery, state: FSMContext):

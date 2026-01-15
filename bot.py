@@ -4,6 +4,9 @@ import asyncio
 import pandas as pd
 import io
 from datetime import datetime
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject
+from typing import Callable, Dict, Any, Awaitable
 
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,

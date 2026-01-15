@@ -63,6 +63,10 @@ class Registration(StatesGroup):
     # Yangi statelar:
     filter_category = State()
     filter_subcategory = State()
+class AdminStates(StatesGroup):
+    waiting_block_id = State()
+    waiting_unblock_id = State()
+
 class SettingsManagement(StatesGroup):
     waiting_for_new_value = State()
     choosing_setting = State()
@@ -1171,32 +1175,27 @@ async def message_sender(message, df, title, color_type, pending_df=None):
 async def imp_back_root(callback: CallbackQuery):
     await import_analysis_start(callback.message)
 
-# --- SUPER ADMIN BUYRUQLARI ---
+# --- SUPER ADMIN BUYRUQLARI (TUZATILGAN VARIANT) ---
 
 @dp.message(F.text.in_(["🔴 Tizimni YOPISH", "🟢 Tizimni OCHISH"]))
-async def toggle_system_lock(message: Message, state: FSMContext): # <-- state qo'shildi
+async def toggle_system_lock(message: Message, state: FSMContext):
     if message.from_user.id != config.SUPER_ADMIN_ID: return
     
     should_lock = "YOPISH" in message.text
     db_manager.set_global_lock(should_lock)
     
     await message.answer(f"✅ Bajarildi! Hozir: {'🚫 Tizim YOPIQ' if should_lock else '✅ Tizim OCHIQ'}")
-    # Menyuni yangilash uchun start funksiyasini chaqiramiz
     await send_welcome(message, state) 
 
+# --- BLOKLASH QISMI ---
 @dp.message(F.text == "🔒 Bloklash")
 async def ask_block(message: Message, state: FSMContext):
     if message.from_user.id != config.SUPER_ADMIN_ID: return
     await message.answer("Bloklash kerak bo'lgan ID ni yuboring:")
-    await state.set_state("waiting_block_id")
+    # Mana bu yer o'zgardi:
+    await state.set_state(AdminStates.waiting_block_id)
 
-@dp.message(F.text == "🔓 Blokdan ochish")
-async def ask_unblock(message: Message, state: FSMContext):
-    if message.from_user.id != config.SUPER_ADMIN_ID: return
-    await message.answer("Blokdan chiqarish kerak bo'lgan ID ni yuboring:")
-    await state.set_state("waiting_unblock_id")
-
-@dp.message(State("waiting_block_id"))
+@dp.message(AdminStates.waiting_block_id)  # <-- Mana bu yer ham o'zgardi
 async def do_block(message: Message, state: FSMContext):
     try:
         tid = int(message.text)
@@ -1205,16 +1204,28 @@ async def do_block(message: Message, state: FSMContext):
         else:
             db_manager.toggle_block_user(tid, True)
             await message.answer(f"✅ {tid} bloklandi. U endi 'Hozircha zakazlar yo'q' deb javob oladi.")
-    except: await message.answer("❌ ID faqat raqam bo'lishi kerak.")
+    except: 
+        await message.answer("❌ ID faqat raqam bo'lishi kerak.")
     await state.clear()
 
-@dp.message(State("waiting_unblock_id"))
+# --- BLOKDAN CHIQARISH QISMI ---
+@dp.message(F.text == "🔓 Blokdan ochish")
+async def ask_unblock(message: Message, state: FSMContext):
+    if message.from_user.id != config.SUPER_ADMIN_ID: return
+    await message.answer("Blokdan chiqarish kerak bo'lgan ID ni yuboring:")
+    # Mana bu yer o'zgardi:
+    await state.set_state(AdminStates.waiting_unblock_id)
+
+@dp.message(AdminStates.waiting_unblock_id) # <-- Mana bu yer ham o'zgardi
 async def do_unblock(message: Message, state: FSMContext):
     try:
         tid = int(message.text)
-        db_manager.toggle_block_user(tid, False)
-        await message.answer(f"✅ {tid} blokdan chiqarildi.")
-    except: await message.answer("❌ ID faqat raqam bo'lishi kerak.")
+        if db_manager.toggle_block_user(tid, False):
+            await message.answer(f"✅ {tid} blokdan chiqarildi.")
+        else:
+            await message.answer(f"⚠️ {tid} aslida blokda emas edi, lekin ro'yxat tozalandi.")
+    except: 
+        await message.answer("❌ ID faqat raqam bo'lishi kerak.")
     await state.clear()
 if __name__ == "__main__":
     asyncio.run(main())

@@ -59,12 +59,11 @@ def get_admin_keyboard():
 def get_supplier_keyboard():
     """Yetkazib beruvchilar uchun asosiy menyu"""
     kb = [
-        [KeyboardButton(text="📦 Zakazlarim"), KeyboardButton(text="📈 Statistika")],
-        # MANA BU TUGMANI QO'SHING 👇
-        [KeyboardButton(text="📅 Import Tahlili"), KeyboardButton(text="📝 Ismni o'zgartirish")]
+        [KeyboardButton(text="📦 Zakazlarim (Yangi)"), KeyboardButton(text="⏳ Jarayonda")],
+        [KeyboardButton(text="📈 Statistika"), KeyboardButton(text="📅 Import Tahlili")],
+        [KeyboardButton(text="📝 Ismni o'zgartirish")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
-
 # --- Yordamchi Funksiyalar ---
 
 async def get_orders_for_supplier(supplier_name: str) -> pd.DataFrame:

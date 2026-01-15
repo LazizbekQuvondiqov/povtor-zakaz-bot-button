@@ -55,7 +55,8 @@ class SecurityMiddleware(BaseMiddleware):
 
         return await handler(event, data)
 dp = Dispatcher()
-dp.update.middleware(SecurityMiddleware())
+dp.message.outer_middleware(SecurityMiddleware())
+dp.callback_query.outer_middleware(SecurityMiddleware())
 class Registration(StatesGroup):
     choosing_name = State()
     changing_name = State()

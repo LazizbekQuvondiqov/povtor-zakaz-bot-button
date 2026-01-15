@@ -400,36 +400,75 @@ async def pending_orders_text(message: types.Message):
         await msg.edit_text("✅ Jarayonda hech narsa yo'q.")
         return
 
-    # Qizillarni (3 kundan oshgan) chiqarib tashlaymiz (Ular Yangi bo'limida chiqadi)
+    # Qizil va Sariqlarni ajratamiz
     pending['created_at_dt'] = pd.to_datetime(pending['created_at'])
     now = datetime.now()
-    mask_normal = (now - pending['created_at_dt']).dt.days < 3
-    normal_pending = pending[mask_normal].copy()
+    
+    mask_red = (now - pending['created_at_dt']).dt.days >= 3
+    red_orders = pending[mask_red].copy()      # Qizil (3+ kun)
+    yellow_orders = pending[~mask_red].copy()  # Sariq (Normal)
 
     await msg.delete()
 
-    if normal_pending.empty:
-        await message.answer("✅ Hozircha tinchlik. (Eski zakazlar yo'q yoki ular kechikib 'Qizil'ga o'tgan).")
-        return
-
-    grouped = normal_pending.groupby('artikul')
-    await message.answer(f"⏳ <b>JARAYONDA ({len(grouped)} ta):</b>\n<i>Skladga kirim kutilmoqda...</i>")
-
-    for article, group in grouped:
-        first = group.iloc[0]
-        # Tugma: Faqat Bekor qilish
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"cancel_order:{article}")]
-        ])
+    # --- 1-QISM: QIZIL (MUAMMOLI) ---
+    if not red_orders.empty:
+        grouped_red = red_orders.groupby('artikul')
+        await message.answer(f"🚨 <b>DIQQAT! KECHIKKANLAR ({len(grouped_red)} ta):</b>\n<i>3 kundan oshdi!</i>")
         
-        caption = f"🟡 <b>{article}</b> (Yo'lda)\n"
-        for shop, s_group in group.groupby('shop'):
-            caption += f"\n🏪 <b>{shop}:</b>"
-            for _, row in s_group.iterrows():
-                caption += f"\n  - {row.get('color','-')}: <b>{row.get('quantity',0)} pochka</b>"
+        for article, group in grouped_red:
+            first = group.iloc[0]
+            # Tugma
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"cancel_order:{article}")]
+            ])
+            
+            caption = f"🔴 <b>{article}</b> (Kechikyapti!)\n"
+            for shop, s_group in group.groupby('shop'):
+                caption += f"\n🏪 <b>{shop}:</b>"
+                for _, row in s_group.iterrows():
+                    caption += f"\n  - {row.get('color','-')}: <b>{row.get('quantity',0)} pochka</b>"
 
-        await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
-        await asyncio.sleep(0.2)
+            # Rasm chiqarish
+            photo = str(first.get('photo', ''))
+            try:
+                if photo.startswith('http'):
+                    await bot.send_photo(message.chat.id, photo, caption=caption, reply_markup=keyboard)
+                else:
+                    await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
+            except:
+                await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
+            await asyncio.sleep(0.2)
+
+    # --- 2-QISM: SARIQ (NORMAL) ---
+    if not yellow_orders.empty:
+        grouped_yellow = yellow_orders.groupby('artikul')
+        await message.answer(f"⏳ <b>YO'LDA ({len(grouped_yellow)} ta):</b>\n<i>Normal holat...</i>")
+
+        for article, group in grouped_yellow:
+            first = group.iloc[0]
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"cancel_order:{article}")]
+            ])
+            
+            caption = f"🟡 <b>{article}</b> (Yo'lda)\n"
+            for shop, s_group in group.groupby('shop'):
+                caption += f"\n🏪 <b>{shop}:</b>"
+                for _, row in s_group.iterrows():
+                    caption += f"\n  - {row.get('color','-')}: <b>{row.get('quantity',0)} pochka</b>"
+
+            # Rasm chiqarish
+            photo = str(first.get('photo', ''))
+            try:
+                if photo.startswith('http'):
+                    await bot.send_photo(message.chat.id, photo, caption=caption, reply_markup=keyboard)
+                else:
+                    await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
+            except:
+                await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
+            await asyncio.sleep(0.2)
+            
+    if red_orders.empty and yellow_orders.empty:
+        await message.answer("✅ Hozircha tinchlik.")
 
 @dp.message(F.text == "📝 Ismni o'zgartirish")
 async def change_name_text(message: types.Message, state: FSMContext):

@@ -471,24 +471,32 @@ async def confirm_cancel_handler(callback: CallbackQuery):
     except Exception as e:
         await callback.message.edit_text(f"❌ Xatolik: {e}")
 
-# --- FEEDBACK HANDLER (Eski, lekin yangilangan) ---
+# --- `bot.py` dagi feedback_handler funksiyasini mana bunga ALMASHTIRING ---
+
 @dp.callback_query(F.data.startswith("feedback:"))
 async def feedback_handler(callback: CallbackQuery):
     _, status, artikul = callback.data.split(":")
-    
-    # Status yangilash
-    # Agar 'Topdim' bo'lsa -> Status='Topdim' ga o'tadi (Sariq bo'ladi)
-    # Agar 'Topilmadi' bo'lsa -> O'chiriladi yoki shunday qoladi (Sizning xohishingiz)
-    # Odatda 'Topilmadi' desa, ertaga yana chiqishi kerak. Shuning uchun o'chirish ma'qul.
     
     new_db_status = 'Topdim' if status == 'Topdim' else 'Topilmadi'
     
     if new_db_status == 'Topdim':
         if db_manager.update_order_status(artikul, 'Topdim'):
-             # Xabarni o'zgartirish
-            await callback.message.edit_text(f"✅ <b>{artikul}</b> 'Kutilmoqda' ro'yxatiga o'tkazildi.", reply_markup=None)
             
-            # Kanalga yuborish (Eski funksiyangizdagi kod)
+            # --- O'ZGARISH SHU YERDA ---
+            new_text = f"✅ <b>{artikul}</b> 'Kutilmoqda' ro'yxatiga o'tkazildi."
+            
+            try:
+                # Agar xabarda rasm bo'lsa -> Captionni o'zgartiramiz
+                if callback.message.photo:
+                    await callback.message.edit_caption(caption=new_text, reply_markup=None)
+                # Agar faqat matn bo'lsa -> Textni o'zgartiramiz
+                else:
+                    await callback.message.edit_text(new_text, reply_markup=None)
+            except Exception as e:
+                # Agar o'zgartirishda xato bo'lsa, shunchaki tugmani olib tashlaymiz
+                await callback.message.edit_reply_markup(reply_markup=None)
+
+            # Kanalga yuborish
             try:
                 if callback.message.photo:
                     photo_id = callback.message.photo[-1].file_id
@@ -498,8 +506,6 @@ async def feedback_handler(callback: CallbackQuery):
             except: pass
             
     else:
-        # Topilmadi -> Demak o'chirib turamiz, ertaga yana 'Yangi' bo'lib chiqadi
-        # Yoki shunchaki xabarni o'chirib qo'yamiz.
         await callback.message.delete()
         await callback.answer("❌ Tushunarli, topilmadi.", show_alert=True)
 # --- SOZLAMALAR CALLBACKLARI ---

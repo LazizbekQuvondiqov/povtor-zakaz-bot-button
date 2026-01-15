@@ -575,17 +575,24 @@ async def cancel_order_handler(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("confirm_cancel:"))
 async def confirm_cancel_handler(callback: CallbackQuery):
     artikul = callback.data.split(":")[1]
-    supplier = db_manager.get_supplier_by_id(callback.from_user.id)
+    # supplier ni tekshirish shart emas, chunki Jarayonda bo'limi umumiy
     
     try:
         from sqlalchemy import text
         with db_manager.engine.begin() as conn:
-            # --- O'ZGARISH SHU YERDA ---
-            # Oldin DELETE edi, endi UPDATE qilamiz:
-            conn.execute(text(f"UPDATE generated_orders SET status = 'Kutilmoqda' WHERE artikul = '{artikul}' AND supplier = '{supplier.name}' AND status = 'Topdim'"))
-            # ---------------------------
+            # --- O'ZGARISH: 'AND supplier = ...' olib tashlandi ---
+            # Faqat Artikul va Status bo'yicha topib o'zgartiramiz
+            query = text(f"""
+                UPDATE generated_orders 
+                SET status = 'Kutilmoqda' 
+                WHERE artikul = '{artikul}' AND status = 'Topdim'
+            """)
+            result = conn.execute(query)
         
-        await callback.message.edit_text(f"✅ <b>{artikul}</b> qaytadan 'Yangi Zakazlar' ro'yxatiga qo'shildi.")
+        if result.rowcount > 0:
+            await callback.message.edit_text(f"✅ <b>{artikul}</b> bekor qilindi.\nQaytadan 'Yangi Zakazlar'ga tushdi.")
+        else:
+            await callback.message.edit_text(f"⚠️ <b>{artikul}</b> o'zgarmadi. Balki allaqachon bekor qilingandir?")
         
     except Exception as e:
         await callback.message.edit_text(f"❌ Xatolik: {e}")

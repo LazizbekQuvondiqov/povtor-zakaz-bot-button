@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 # .env faylini yuklash
 load_dotenv()
-
+SUPER_ADMIN_ID = 1205534758
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BILLZ_SECRET_KEY = os.getenv("BILLZ_SECRET_KEY")
 ALL_SHOPS_IDS = os.getenv("BILLZ_SHOP_IDS")

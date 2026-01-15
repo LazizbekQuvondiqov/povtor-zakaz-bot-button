@@ -289,64 +289,110 @@ async def show_statistics(message: types.Message):
 
 # --- SUPPLIER TUGMALARI UCHUN HANDLERLAR ---
 
+# --- SUPPLIER TUGMALARI UCHUN HANDLERLAR ---
+
 @dp.message(F.text == "📦 Zakazlarim")
 async def my_orders_text(message: types.Message):
-    # Text xabarni CallbackQuery logicaga moslaymiz
-    # Bu yerda to'g'ridan-to'g'ri logikani yozamiz
     supplier = db_manager.get_supplier_by_id(message.from_user.id)
     if not supplier:
         await message.answer("❌ Tizimga kirmagansiz. /start")
         return
 
     msg = await message.answer("⏳ Yuklanmoqda...")
+    
+    # Bazadan hammasini olamiz: Kutilmoqda (Yangi) va Topdim (Sariq)
     orders_df = await get_orders_for_supplier(supplier.name)
 
     if orders_df.empty:
-        await msg.edit_text("✅ Yangi zakazlar yo'q.")
+        await msg.edit_text("✅ Hozircha zakazlar yo'q.")
         return
 
-    pending = orders_df[orders_df['status'] == 'Kutilmoqda'].copy()
-    if pending.empty:
-        await msg.edit_text("✅ Javob berilmagan zakazlar yo'q.")
+    # Filtrlash
+    new_orders = orders_df[orders_df['status'] == 'Kutilmoqda'].copy()
+    pending_orders = orders_df[orders_df['status'] == 'Topdim'].copy()
+    
+    if new_orders.empty and pending_orders.empty:
+        await msg.edit_text("✅ Hozircha zakazlar yo'q.")
         return
 
-    await msg.delete() # "Yuklanmoqda" ni o'chiramiz
+    await msg.delete()
 
-    grouped = pending.groupby('artikul')
-    await message.answer(f"📥 <b>{len(grouped)} ta</b> artikul bo'yicha zakaz bor:")
+    # --- 1-QISM: YANGI ZAKAZLAR (OQ) ---
+    if not new_orders.empty:
+        grouped_new = new_orders.groupby('artikul')
+        await message.answer(f"🔥 <b>YANGI ZAKAZLAR ({len(grouped_new)} ta artikul):</b>\n<i>Harakat talab qilinadi</i>")
+        
+        for article, group in grouped_new:
+            first = group.iloc[0]
+            
+            # Agar bu tovar bo'yicha 'Sariq' zakaz ham bo'lsa -> Eslatma qo'shamiz
+            pending_match = pending_orders[pending_orders['artikul'] == article]
+            warning_text = ""
+            if not pending_match.empty:
+                pending_qty = pending_match['quantity'].sum()
+                warning_text = f"\n⚠️ <b>Eslatma:</b> {int(pending_qty)} pochka yo'lda (Kutilmoqda)."
 
-    for article, group in grouped:
-        first = group.iloc[0]
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Topdim", callback_data=f"feedback:Topdim:{article}"),
-             InlineKeyboardButton(text="❌ Topilmadi", callback_data=f"feedback:Topilmadi:{article}")]
-        ])
-        price = first.get('supply_price', 0)
-        try:
-            price_str = f"{float(price):,.0f}".replace(",", " ")
-        except:
-            price_str = "0"
+            # Tugmalar: Topdim / Yo'q
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Topdim", callback_data=f"feedback:Topdim:{article}"),
+                 InlineKeyboardButton(text="❌ Topilmadi", callback_data=f"feedback:Topilmadi:{article}")]
+            ])
+            
+            price = first.get('supply_price', 0)
+            try: price_str = f"{float(price):,.0f}".replace(",", " ")
+            except: price_str = "0"
 
-        caption = f"📦 <b>{article}</b>\n💵 Tan Narx: <b>{price_str} so'm</b>\nToifa: {first.get('subcategory', '-')}\n"
+            caption = f"📦 <b>{article}</b>{warning_text}\n💵 Tan Narx: <b>{price_str} so'm</b>\nToifa: {first.get('subcategory', '-')}\n"
 
-        for shop, s_group in group.groupby('shop'):
-            caption += f"\n🏪 <b>{shop}:</b>"
-            for _, row in s_group.iterrows():
-                caption += f"\n  - {row.get('color','-')}: <b>{row.get('quantity',0)} pochka</b>"
+            for shop, s_group in group.groupby('shop'):
+                caption += f"\n🏪 <b>{shop}:</b>"
+                for _, row in s_group.iterrows():
+                    caption += f"\n  - {row.get('color','-')}: <b>{row.get('quantity',0)} pochka</b>"
 
-        photo = str(first.get('photo', ''))
-        try:
-            if photo.startswith('http'):
-                if len(caption) > 1024:
-                    await bot.send_photo(message.chat.id, photo)
-                    await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
-                else:
+            # Rasm bilan chiqarish
+            photo = str(first.get('photo', ''))
+            try:
+                if photo.startswith('http'):
                     await bot.send_photo(message.chat.id, photo, caption=caption, reply_markup=keyboard)
-            else:
+                else:
+                    await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
+            except Exception:
                 await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
-        except Exception:
+            await asyncio.sleep(0.3)
+
+    # --- 2-QISM: KUTILMOQDA (SARIQ) ---
+    if not pending_orders.empty:
+        grouped_pending = pending_orders.groupby('artikul')
+        
+        # Alohida ajratib ko'rsatish
+        await message.answer("〰️〰️〰️〰️〰️〰️〰️〰️\n⏳ <b>YO'LDA / KUTILMOQDA:</b>\n<i>Siz bularni 'Topdim' degansiz. Skladga kirim kutilmoqda.</i>")
+        
+        for article, group in grouped_pending:
+            first = group.iloc[0]
+            
+            # Tugma: Faqat Bekor qilish
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Bekor qilish (Xato bosilgan)", callback_data=f"cancel_order:{article}")]
+            ])
+            
+            # Qizil zona tekshiruvi (3 kun)
+            created_date = pd.to_datetime(first.get('created_at', datetime.now()))
+            days_waiting = (datetime.now() - created_date).days
+            
+            alert_emoji = "🟡"
+            alert_text = "(Yo'lda)"
+            if days_waiting >= 3:
+                alert_emoji = "🔴"
+                alert_text = f"<b>(DIQQAT: {days_waiting} kun bo'ldi!)</b>"
+
+            caption = f"{alert_emoji} <b>{article}</b> {alert_text}\n"
+            for shop, s_group in group.groupby('shop'):
+                caption += f"\n🏪 <b>{shop}:</b>"
+                for _, row in s_group.iterrows():
+                    caption += f"\n  - {row.get('color','-')}: <b>{row.get('quantity',0)} pochka</b>"
+
             await bot.send_message(message.chat.id, caption, reply_markup=keyboard)
-        await asyncio.sleep(0.3)
+            await asyncio.sleep(0.2)
 
 @dp.message(F.text == "📝 Ismni o'zgartirish")
 async def change_name_text(message: types.Message, state: FSMContext):

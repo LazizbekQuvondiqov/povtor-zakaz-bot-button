@@ -136,6 +136,8 @@ async def send_welcome(message: Message, state: FSMContext):
         
         kb = [
             [KeyboardButton(text=lock_text)],
+            # Yangi tugmalar qatori:
+            [KeyboardButton(text="✅ VIP Qo'shish"), KeyboardButton(text="❌ VIP Olish")], 
             [KeyboardButton(text="🔒 Bloklash"), KeyboardButton(text="🔓 Blokdan ochish")],
             [KeyboardButton(text="📊 Hisobot"), KeyboardButton(text="⚙️ Sozlamalar")]
         ]
@@ -144,6 +146,7 @@ async def send_welcome(message: Message, state: FSMContext):
             reply_markup=ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
         )
         return
+    
     # ... (kodning qolgan qismi davom etadi: Admin va Supplier tekshiruvi) ...
     # 1. Admin menyusi
     if db_manager.is_admin(user_id):
@@ -1235,6 +1238,38 @@ async def do_unblock(message: Message, state: FSMContext):
             await message.answer(f"⚠️ {tid} aslida blokda emas edi, lekin ro'yxat tozalandi.")
     except: 
         await message.answer("❌ ID faqat raqam bo'lishi kerak.")
+    await state.clear()
+
+# --- VIP (RUXSAT BERISH) QISMI ---
+
+@dp.message(F.text == "✅ VIP Qo'shish")
+async def ask_allow(message: Message, state: FSMContext):
+    if message.from_user.id != config.SUPER_ADMIN_ID: return
+    await message.answer("Tizim yopiq paytida ham kira oladigan ID ni yuboring:")
+    await state.set_state(AdminStates.waiting_allow_id)
+
+@dp.message(AdminStates.waiting_allow_id)
+async def do_allow(message: Message, state: FSMContext):
+    try:
+        tid = int(message.text)
+        db_manager.toggle_allow_user(tid, True)
+        await message.answer(f"✅ {tid} ga ruxsat berildi.\nTizim yopiq bo'lsa ham u kira oladi.")
+    except: await message.answer("❌ ID faqat raqam bo'lishi kerak.")
+    await state.clear()
+
+@dp.message(F.text == "❌ VIP Olish")
+async def ask_disallow(message: Message, state: FSMContext):
+    if message.from_user.id != config.SUPER_ADMIN_ID: return
+    await message.answer("VIP ro'yxatdan o'chirish kerak bo'lgan ID ni yuboring:")
+    await state.set_state(AdminStates.waiting_disallow_id)
+
+@dp.message(AdminStates.waiting_disallow_id)
+async def do_disallow(message: Message, state: FSMContext):
+    try:
+        tid = int(message.text)
+        db_manager.toggle_allow_user(tid, False)
+        await message.answer(f"❌ {tid} dan maxsus ruxsat olib tashlandi.")
+    except: await message.answer("❌ ID faqat raqam bo'lishi kerak.")
     await state.clear()
 if __name__ == "__main__":
     asyncio.run(main())

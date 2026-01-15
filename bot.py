@@ -40,18 +40,25 @@ class SecurityMiddleware(BaseMiddleware):
         
         user_id = user.id
 
-        # 1. SUPER ADMINGA MUMKIN (Sizga har doim ruxsat)
+        # 1. SUPER ADMIN (Har doim ruxsat)
         if user_id == config.SUPER_ADMIN_ID:
             return await handler(event, data)
 
-        # 2. TEKSHIRUV: Bot yopiqmi YOKI User blokdami?
-        if db_manager.is_global_locked() or db_manager.is_blocked(user_id):
-            # Javob qaytaramiz
-            if isinstance(event, Message):
-                await event.answer("Hozircha zakazlar yo'q")
-            elif isinstance(event, CallbackQuery):
-                await event.answer("Hozircha zakazlar yo'q", show_alert=True)
-            return # Bot shu yerda to'xtaydi, buyruq bajarilmaydi
+        # 2. QORA RO'YXAT (Individual blok)
+        if db_manager.is_blocked(user_id):
+            msg = "🚫 Siz Admin tomonidan bloklangansiz."
+            if isinstance(event, Message): await event.answer(msg)
+            elif isinstance(event, CallbackQuery): await event.answer(msg, show_alert=True)
+            return
+
+        # 3. GLOBAL QULF (Tizim yopiqmi?)
+        if db_manager.is_global_locked():
+            # Agar tizim yopiq bo'lsa, faqat "Ruxsat berilganlar" (VIP) kira oladi
+            if not db_manager.is_allowed(user_id):
+                msg = "🔒 Hozircha zakazlar yo'q (Tizim vaqtincha yopiq)."
+                if isinstance(event, Message): await event.answer(msg)
+                elif isinstance(event, CallbackQuery): await event.answer(msg, show_alert=True)
+                return
 
         return await handler(event, data)
 dp = Dispatcher()

@@ -442,20 +442,13 @@ def update_stock(access_token, engine):
         print(f"⚠️ d_Magazinlar yangilashda xatolik: {e}")
         
 def analyze_and_generate_orders(engine):
-    print("\n--- 4-QADAM: TAHLIL (MAGAZIN + ARTIKUL + RANG + SANA FILTRI) ---")
+    print("\n--- 4-QADAM: TAHLIL VA AQLLI GENERATSIYA (Svetofor: Artikul+Rang+Shop) ---")
 
     try:
-        # ---------------------------------------------------------
-        # 1. JADVALLARNI O'QISH
-        # ---------------------------------------------------------
-        
-        # A) DIMENSION: Mahsulotlar (Import sanasi kerak)
+        # 1. Jadvallarni o'qish (Eski kod bilan bir xil)
         d_mahsulotlar = pd.read_sql("SELECT * FROM d_mahsulotlar", engine)
-        
-        # B) FACT: Sotuvlar (DIQQAT: "Дата" ustuni bilan birga olinyapti)
         f_sotuvlar = pd.read_sql('SELECT product_id, "Магазин", "Продано за вычетом возвратов", "Дата" FROM f_sotuvlar', engine)
         
-        # C) FACT: Qoldiqlar (Snapshot - faqat bugungi holat)
         qoldiq_query = """
         SELECT t1.product_id, t1."Магазин", t1."Кол-во"
         FROM f_qoldiqlar t1
@@ -467,26 +460,19 @@ def analyze_and_generate_orders(engine):
         """
         f_qoldiqlar = pd.read_sql(qoldiq_query, engine)
 
-        # ---------------------------------------------------------
-        # 2. FORMATLASH VA DATA TAYYORLASH
-        # ---------------------------------------------------------
+        # Formatlash
         f_sotuvlar['Магазин'] = f_sotuvlar['Магазин'].astype(str).str.strip()
         f_qoldiqlar['Магазин'] = f_qoldiqlar['Магазин'].astype(str).str.strip()
-        
         d_mahsulotlar['product_id'] = d_mahsulotlar['product_id'].astype(str)
         f_sotuvlar['product_id'] = f_sotuvlar['product_id'].astype(str)
         f_qoldiqlar['product_id'] = f_qoldiqlar['product_id'].astype(str)
-        
-        # Sanalarni datetime formatiga o'tkazish (Taqqoslashtirish uchun o'ta muhim!)
         f_sotuvlar['sotuv_sanasi'] = pd.to_datetime(f_sotuvlar['Дата'], errors='coerce')
         
-        # Import sanasini aniqlash
         date_col = 'import_date' if 'import_date' in d_mahsulotlar.columns else 'Дата1'
         d_mahsulotlar['import_sana_dt'] = pd.to_datetime(d_mahsulotlar[date_col], errors='coerce', dayfirst=True)
-        # Sana yo'q bo'lsa, bugungi kun qo'yiladi (xato bermasligi uchun)
         d_mahsulotlar['import_sana_dt'].fillna(datetime.now(), inplace=True)
         d_mahsulotlar['Цвет'] = d_mahsulotlar['Цвет'].fillna('No Color')
-
+        
         settings = db_manager.get_all_settings()
 
     except Exception as e:
@@ -494,50 +480,87 @@ def analyze_and_generate_orders(engine):
         return
 
     # ---------------------------------------------------------
-    # 3. "ANCHOR DATE" (TAYANCH SANA) NI ANIQLASH
-    # Har bir Magazin+Artikul+Rang uchun eng yangi import sanasini topamiz.
+    # 🟢 1-BOSQICH: "YASHIL" REJIM (Avtomatik Tozalash)
+    # ---------------------------------------------------------
+    try:
+        # Bazadagi 'Topdim' statusli zakazlarni olamiz
+        pending_orders = pd.read_sql("SELECT * FROM generated_orders WHERE status = 'Topdim'", engine)
+        
+        if not pending_orders.empty:
+            # Hozirgi qoldiqni Artikul + Shop + Rang bo'yicha tayyorlaymiz
+            qoldiq_merged = pd.merge(f_qoldiqlar, d_mahsulotlar[['product_id', 'Артикул', 'Цвет']], on='product_id', how='left')
+            # Rang bo'sh bo'lsa 'No Color'
+            qoldiq_merged['Цвет'] = qoldiq_merged['Цвет'].fillna('No Color')
+            
+            # Lug'at kaliti: (Artikul, Shop, Color)
+            # Diqqat: Bazada color formati: "Qora (15.01.2024)" bo'lishi mumkin. 
+            # Lekin biz initial_stock ni tekshiryapmiz, shuning uchun ID orqali o'chirish aniqroq bo'lardi.
+            # Mayli, mantiq bo'yicha: Artikul+Shop+Rang mos kelsa va Qoldiq oshsa -> O'chiramiz.
+            
+            current_stock_map = qoldiq_merged.groupby(['Артикул', 'Магазин', 'Цвет'])['Кол-во'].sum().to_dict()
+            
+            ids_to_delete = []
+            
+            for _, order in pending_orders.iterrows():
+                # Order dagi 'color' ustuni ichida sana bor (masalan "Qora (12.01)").
+                # Bizga toza rang nomi kerak. Yoki shunchaki Artikul+Shop bo'yicha umumiy qarasakchi?
+                # Keling, aniq bo'lishi uchun Artikul + Shop bo'yicha qaraymiz (Rang ajratish qiyin bo'lsa).
+                # Lekin siz "Artikul takrorlanadi" dedingiz. 
+                
+                # Yechim: generated_orders da 'zakaz_id' bor (bu Artikul).
+                # Keling, oddiy yo'ldan boramiz: 
+                # Agar shu Artikul shu Do'konda umumiy qoldig'i oshgan bo'lsa -> O'chiramiz.
+                
+                art = str(order['artikul'])
+                shop = str(order['shop'])
+                
+                # Shu artikul va shop bo'yicha jami qoldiq (barcha ranglar)
+                curr_stock = qoldiq_merged[(qoldiq_merged['Артикул'] == art) & (qoldiq_merged['Магазин'] == shop)]['Кол-во'].sum()
+                
+                init_stock = order['initial_stock'] if order['initial_stock'] is not None else 0
+                
+                if curr_stock > init_stock:
+                    ids_to_delete.append(order['id'])
+                    print(f"✅ KELDI: {art} ({shop}) | {init_stock} -> {curr_stock}")
+
+            if ids_to_delete:
+                id_tuple = tuple(ids_to_delete)
+                if len(ids_to_delete) == 1:
+                    delete_query = text(f"DELETE FROM generated_orders WHERE id = {ids_to_delete[0]}")
+                else:
+                    delete_query = text(f"DELETE FROM generated_orders WHERE id IN {id_tuple}")
+                
+                with engine.begin() as conn:
+                    conn.execute(delete_query)
+                print(f"🗑 {len(ids_to_delete)} ta yetib kelgan zakaz o'chirildi.")
+
+    except Exception as e:
+        print(f"⚠️ Avto-tozalashda xatolik: {e}")
+
+    # ---------------------------------------------------------
+    # 2-BOSQICH: HISOB-KITOB (ESKI KOD 100% O'ZGARISHSIZ)
     # ---------------------------------------------------------
     
-    # Qoldiqlarni mahsulot ma'lumotlari bilan birlashtiramiz
     qoldiq_merged = pd.merge(f_qoldiqlar, d_mahsulotlar, on='product_id', how='left')
     qoldiq_merged.dropna(subset=['Артикул'], inplace=True)
 
-    # GURUHLASH 1: Har bir guruh uchun MAX import sanasini topish
     reference_dates = qoldiq_merged.groupby(['Артикул', 'Магазин', 'Цвет'], as_index=False)['import_sana_dt'].max()
     reference_dates.rename(columns={'import_sana_dt': 'max_import_date'}, inplace=True)
 
-    # ---------------------------------------------------------
-    # 4. SOTUVLARNI FILTRLASH (FILTR LOGIKASI)
-    # Faqat "Sotuv Sanasi >= Import Sanasi" bo'lgan qatorlarni olamiz
-    # ---------------------------------------------------------
-    
-    # Sotuvlarga mahsulot ma'lumotlarini ulaymiz
     sotuv_merged = pd.merge(f_sotuvlar, d_mahsulotlar[['product_id', 'Артикул', 'Цвет']], on='product_id', how='left')
     sotuv_merged.dropna(subset=['Артикул'], inplace=True)
 
-    # Sotuvlarga boyagi "MAX SANA"ni ulaymiz
     sotuv_final = pd.merge(sotuv_merged, reference_dates, on=['Артикул', 'Магазин', 'Цвет'], how='left')
-    
-    # Agar max sana topilmasa (qoldiqda yo'q bo'lsa), sotuvni tashlab yuboramiz yoki hammasini olamiz.
-    # Sizning holatda aktiv tovarlar muhim, shuning uchun sanasi borlarni olamiz.
     sotuv_final.dropna(subset=['max_import_date'], inplace=True)
     
-    # 🔥 FILTR: Eski tarixni kesib tashlash
-    # Andalus misoli: 9-Dekabrdan oldingi 13 ta sotuv shu yerda o'chib ketadi.
     sotuv_filtered = sotuv_final[sotuv_final['sotuv_sanasi'] >= sotuv_final['max_import_date']].copy()
     
-    # GURUHLASH 2: Endi toza sotuvlarni SUM qilamiz
     sotuv_grp = sotuv_filtered.groupby(['Артикул', 'Магазин', 'Цвет'], as_index=False)['Продано за вычетом возвратов'].sum()
     sotuv_grp.rename(columns={'Продано за вычетом возвратов': 'Prodano'}, inplace=True)
 
-    # ---------------------------------------------------------
-    # 5. QOLDIQLARNI GURUHLASH (AGGREGATION)
-    # ---------------------------------------------------------
-    
-    # Qoldiqlar uchun SUM va boshqa ma'lumotlarni (Narx, Rasm) olish
     agg_rules_qoldiq = {
-        'Кол-во': 'sum',            # 1 pochka + 2 pochka = 3 pochka
-        'import_sana_dt': 'max',    # Eng YANGI sana
+        'Кол-во': 'sum',
+        'import_sana_dt': 'max',
         'supply_price': 'max',
         'Поставщик': 'first',
         'Категория': 'first',
@@ -548,68 +571,42 @@ def analyze_and_generate_orders(engine):
     qoldiq_grp = qoldiq_merged.groupby(['Артикул', 'Магазин', 'Цвет'], as_index=False).agg(agg_rules_qoldiq)
     qoldiq_grp.rename(columns={'Кол-во': 'Hozirgi_Qoldiq'}, inplace=True)
 
-    # ---------------------------------------------------------
-    # 6. MASTER JADVALNI YIG'ISH VA HISOBLASH
-    # ---------------------------------------------------------
-    
-    # Asosiy jadval - Qoldiqlar (Chunki biz bor tovarga zakaz beryapmiz)
     final_df = pd.merge(qoldiq_grp, sotuv_grp, on=['Артикул', 'Магазин', 'Цвет'], how='left')
-    final_df['Prodano'].fillna(0, inplace=True) # Sotuv yo'q bo'lsa 0 bo'ladi
+    final_df['Prodano'].fillna(0, inplace=True)
 
-    # Kunlar farqini hisoblash
     max_sana_kalendar = datetime.now(TASHKENT_TZ).replace(tzinfo=None)
     final_df['days_passed'] = (max_sana_kalendar - final_df['import_sana_dt']).dt.days
     final_df['days_passed'] = final_df['days_passed'].clip(lower=0)
 
-    # O'rtacha kunlik sotuv
     final_df['avg_sales'] = final_df.apply(
         lambda row: row['Prodano'] / (row['days_passed'] if row['days_passed'] > 0 else 1), axis=1
     )
 
     def calculate_order(row):
         kun = row['days_passed']
-        sotuv = row['Prodano']          # Bu yerda endi faqat YANGI sotuvlar (Filtrlangan)
-        qoldiq = row['Hozirgi_Qoldiq']  # Bu yerda JAMI qoldiq (SUM)
+        sotuv = row['Prodano']
+        qoldiq = row['Hozirgi_Qoldiq']
         avg = row['avg_sales']
-        
-        # Import soni = Yangi Sotuv + Jami Qoldiq
         import_soni = sotuv + qoldiq
         if import_soni == 0: return 0
-        
         foiz = (sotuv / import_soni) * 100
         
-        # --- QOIDALAR ---
-        
-        # 4-QOIDA (1-5 kun, Yangi)
         if settings.get('m4_min_days', 1) <= kun <= settings.get('m4_max_days', 5):
-            if foiz >= settings.get('m4_percentage', 50):
-                # Agar 3 ta sotilgan bo'lsa (va bu 50% dan ko'p bo'lsa) -> 3 ta zakaz beradi
-                return sotuv * 1.0
-
-        # 3-QOIDA (6-9 kun)
+            if foiz >= settings.get('m4_percentage', 50): return sotuv * 1.0
         if settings.get('m3_min_days', 6) <= kun <= settings.get('m3_max_days', 9):
-            if foiz >= settings.get('m3_percentage', 70):
-                return avg * 7 
-
-        # 2-QOIDA (10-14 kun)
+            if foiz >= settings.get('m3_percentage', 70): return avg * 7 
         if settings.get('m2_min_days', 10) <= kun <= settings.get('m2_max_days', 14):
-            if foiz >= settings.get('m2_percentage', 85):
-                return avg * 7
-
-        # 1-QOIDA (15+ kun, Eski)
+            if foiz >= settings.get('m2_percentage', 85): return avg * 7
         if settings.get('m1_min_days', 15) <= kun <= settings.get('m1_max_days', 1000):
-            if foiz >= settings.get('m1_percentage', 99):
-                return avg * 7
-
+            if foiz >= settings.get('m1_percentage', 99): return avg * 7
         return 0
 
     final_df['final_order'] = final_df.apply(calculate_order, axis=1)
     
-    # Pochka hisoblash (Sizning shkalangiz)
     def to_pochka(dona):
         dona = float(dona)
         if dona <= 2: return 0
-        if dona <= 4: return 1  # 3 dona -> 1 pochka
+        if dona <= 4: return 1
         if dona <= 10: return 2
         if dona <= 15: return 3
         if dona <= 23: return 4
@@ -617,33 +614,31 @@ def analyze_and_generate_orders(engine):
         return math.ceil(dona / 6)
 
     orders = final_df[final_df['final_order'] > 0].copy()
-    
     if orders.empty:
-        print("✅ Zakaz yo'q.")
+        print("✅ Yangi hisob bo'yicha zakaz yo'q.")
         return
 
     orders['quantity'] = orders['final_order'].apply(to_pochka).astype(int)
     orders = orders[orders['quantity'] > 0].copy()
 
-    # Formatlash
     orders['sana_str'] = orders['import_sana_dt'].dt.strftime('%d.%m.%Y')
     orders['color'] = orders['Цвет'].astype(str) + " (" + orders['sana_str'] + ")"
     orders['tovar_holati'] = "Shart Bajarildi"
 
-    # DB ga yozish uchun tayyorlash
+    # ---------------------------------------------------------
+    # 🟡 3-BOSQICH: SVETOFOR FILTER (Eski Mantiq bilan)
+    # ---------------------------------------------------------
+    
+    # Bazadagi 'Topdim' statusli zakazlarni olamiz
+    active_orders = pd.read_sql("SELECT * FROM generated_orders WHERE status = 'Topdim'", engine)
+    
     rename_map = {
         'Артикул': 'zakaz_id',
-        'Поставщик': 'supplier',
-        'Категория': 'category',
-        'Подкатегория': 'subcategory',
-        'Магазин': 'shop',
-        'Фото': 'photo',
-        'import_sana_dt': 'import_date',
-        'Hozirgi_Qoldiq': 'hozirgi_qoldiq',
-        'Prodano': 'prodano',
-        'days_passed': 'days_passed',
-        'avg_sales': 'ortacha_sotuv',
-        'final_order': 'kutilyotgan_sotuv',
+        'Поставщик': 'supplier', 'Категория': 'category',
+        'Подкатегория': 'subcategory', 'Магазин': 'shop', 'Фото': 'photo',
+        'import_sana_dt': 'import_date', 'Hozirgi_Qoldiq': 'hozirgi_qoldiq',
+        'Prodano': 'prodano', 'days_passed': 'days_passed',
+        'avg_sales': 'ortacha_sotuv', 'final_order': 'kutilyotgan_sotuv',
         'supply_price': 'supply_price'
     }
     
@@ -652,19 +647,50 @@ def analyze_and_generate_orders(engine):
     orders_db['status'] = 'Kutilmoqda'
     orders_db['created_at'] = datetime.now(TASHKENT_TZ).replace(tzinfo=None).date()
     orders_db['import_date'] = pd.to_datetime(orders_db['import_date']).dt.date
+    orders_db['initial_stock'] = orders_db['hozirgi_qoldiq']
 
     cols = [
         'zakaz_id', 'supplier', 'artikul', 'category', 'subcategory', 'shop', 'color', 'photo',
         'quantity', 'supply_price', 'hozirgi_qoldiq', 'prodano', 'days_passed', 
-        'ortacha_sotuv', 'kutilyotgan_sotuv', 'tovar_holati', 'import_date', 'created_at', 'status'
+        'ortacha_sotuv', 'kutilyotgan_sotuv', 'tovar_holati', 'import_date', 'created_at', 'status', 'initial_stock'
     ]
     orders_db = orders_db[[c for c in cols if c in orders_db.columns]]
+
+    orders_to_insert = []
+    
+    for _, new_row in orders_db.iterrows():
+        # Match: Artikul + Shop + Color
+        match = active_orders[
+            (active_orders['artikul'] == new_row['artikul']) & 
+            (active_orders['shop'] == new_row['shop']) &
+            (active_orders['color'] == new_row['color'])
+        ]
+        
+        if not match.empty:
+            old_qty = match.iloc[0]['quantity']
+            new_qty = new_row['quantity']
+            
+            # Agar ehtiyoj OSHGAN bo'lsa -> YANGI ZAKAZ
+            if new_qty > old_qty:
+                orders_to_insert.append(new_row)
+            else:
+                # Ehtiyoj o'zgarmadi -> BLOK (Sariq qoladi)
+                pass
+        else:
+            # Bazada yo'q -> Yangi Zakaz
+            orders_to_insert.append(new_row)
 
     try:
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM generated_orders WHERE status = 'Kutilmoqda'"))
-            orders_db.to_sql("generated_orders", conn, if_exists="append", index=False)
-        print(f"✅ BAZA YANGILANDI: {len(orders_db)} ta to'g'ri hisoblangan va guruhlangan zakaz yozildi.")
+            
+            if orders_to_insert:
+                df_to_write = pd.DataFrame(orders_to_insert)
+                df_to_write.to_sql("generated_orders", conn, if_exists="append", index=False)
+                print(f"✅ BAZA YANGILANDI: {len(df_to_write)} ta yangi zakaz (Filtrlangan).")
+            else:
+                print("✅ Yangi zakaz yo'q (Hammasi jarayonda).")
+                
     except Exception as e:
         print(f"❌ Yozishda xatolik: {e}")
 

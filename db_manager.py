@@ -25,7 +25,37 @@ class Supplier(Base):
     # Endi bir xil nomda bir nechta odam bo'lishi mumkin
     name = Column(String, nullable=False) 
     telegram_id = Column(BigInteger, unique=True, nullable=False)
+# --- VIP (RUXSAT BERILGANLAR) QISMI ---
 
+class AllowedUser(Base):
+    """Tizim yopiq bo'lganda ham kira oladiganlar"""
+    __tablename__ = 'allowed_users'
+    id = Column(Integer, primary_key=True)
+    telegram_id = Column(BigInteger, unique=True)
+
+def toggle_allow_user(telegram_id: int, allow: bool):
+    """True = Ruxsat berish, False = Ruxsatni olish"""
+    session = Session()
+    try:
+        user = session.query(AllowedUser).filter_by(telegram_id=telegram_id).first()
+        if allow:
+            if not user: session.add(AllowedUser(telegram_id=telegram_id))
+        else:
+            if user: session.delete(user)
+        session.commit()
+        return True
+    except:
+        session.rollback()
+        return False
+    finally:
+        session.close()
+
+def is_allowed(telegram_id: int) -> bool:
+    session = Session()
+    try:
+        return session.query(AllowedUser).filter_by(telegram_id=telegram_id).first() is not None
+    finally:
+        session.close()
 class Admin(Base):
     __tablename__ = 'admins'
     id = Column(Integer, primary_key=True)

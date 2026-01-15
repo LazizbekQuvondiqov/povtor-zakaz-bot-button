@@ -73,6 +73,8 @@ class Registration(StatesGroup):
 class AdminStates(StatesGroup):
     waiting_block_id = State()
     waiting_unblock_id = State()
+    waiting_allow_id = State()    # <-- YANGI
+    waiting_disallow_id = State() # <-- YANGI
 
 class SettingsManagement(StatesGroup):
     waiting_for_new_value = State()

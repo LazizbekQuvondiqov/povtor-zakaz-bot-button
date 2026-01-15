@@ -533,21 +533,18 @@ async def confirm_cancel_handler(callback: CallbackQuery):
     artikul = callback.data.split(":")[1]
     supplier = db_manager.get_supplier_by_id(callback.from_user.id)
     
-    # Bazadan o'chirish (Status='Topdim' bo'lganlarni)
-    # db_manager ga yangi funksiya yozish shart emas, shu yerdan SQL chaqirsak ham bo'ladi, 
-    # lekin to'g'risi db_manager.cancel_order funksiyasini ishlatish.
-    # Hozircha oddiy query bilan qilamiz:
-    
     try:
         from sqlalchemy import text
         with db_manager.engine.begin() as conn:
-            conn.execute(text(f"DELETE FROM generated_orders WHERE artikul = '{artikul}' AND supplier = '{supplier.name}' AND status = 'Topdim'"))
+            # --- O'ZGARISH SHU YERDA ---
+            # Oldin DELETE edi, endi UPDATE qilamiz:
+            conn.execute(text(f"UPDATE generated_orders SET status = 'Kutilmoqda' WHERE artikul = '{artikul}' AND supplier = '{supplier.name}' AND status = 'Topdim'"))
+            # ---------------------------
         
-        await callback.message.edit_text(f"✅ <b>{artikul}</b> bekor qilindi.")
+        await callback.message.edit_text(f"✅ <b>{artikul}</b> qaytadan 'Yangi Zakazlar' ro'yxatiga qo'shildi.")
+        
     except Exception as e:
         await callback.message.edit_text(f"❌ Xatolik: {e}")
-
-# --- `bot.py` dagi feedback_handler funksiyasini mana bunga ALMASHTIRING ---
 
 @dp.callback_query(F.data.startswith("feedback:"))
 async def feedback_handler(callback: CallbackQuery):

@@ -482,46 +482,45 @@ def analyze_and_generate_orders(engine):
     # ---------------------------------------------------------
     # 🟢 1-BOSQICH: "YASHIL" REJIM (Avtomatik Tozalash)
     # ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # 🟢 1-BOSQICH: "YASHIL" REJIM (Artikul + Rang + Magazin)
+    # ---------------------------------------------------------
     try:
-        # Bazadagi 'Topdim' statusli zakazlarni olamiz
         pending_orders = pd.read_sql("SELECT * FROM generated_orders WHERE status = 'Topdim'", engine)
         
         if not pending_orders.empty:
-            # Hozirgi qoldiqni Artikul + Shop + Rang bo'yicha tayyorlaymiz
+            # Hozirgi qoldiqni olish
             qoldiq_merged = pd.merge(f_qoldiqlar, d_mahsulotlar[['product_id', 'Артикул', 'Цвет']], on='product_id', how='left')
-            # Rang bo'sh bo'lsa 'No Color'
             qoldiq_merged['Цвет'] = qoldiq_merged['Цвет'].fillna('No Color')
-            
-            # Lug'at kaliti: (Artikul, Shop, Color)
-            # Diqqat: Bazada color formati: "Qora (15.01.2024)" bo'lishi mumkin. 
-            # Lekin biz initial_stock ni tekshiryapmiz, shuning uchun ID orqali o'chirish aniqroq bo'lardi.
-            # Mayli, mantiq bo'yicha: Artikul+Shop+Rang mos kelsa va Qoldiq oshsa -> O'chiramiz.
-            
-            current_stock_map = qoldiq_merged.groupby(['Артикул', 'Магазин', 'Цвет'])['Кол-во'].sum().to_dict()
             
             ids_to_delete = []
             
             for _, order in pending_orders.iterrows():
-                # Order dagi 'color' ustuni ichida sana bor (masalan "Qora (12.01)").
-                # Bizga toza rang nomi kerak. Yoki shunchaki Artikul+Shop bo'yicha umumiy qarasakchi?
-                # Keling, aniq bo'lishi uchun Artikul + Shop bo'yicha qaraymiz (Rang ajratish qiyin bo'lsa).
-                # Lekin siz "Artikul takrorlanadi" dedingiz. 
-                
-                # Yechim: generated_orders da 'zakaz_id' bor (bu Artikul).
-                # Keling, oddiy yo'ldan boramiz: 
-                # Agar shu Artikul shu Do'konda umumiy qoldig'i oshgan bo'lsa -> O'chiramiz.
-                
                 art = str(order['artikul'])
                 shop = str(order['shop'])
                 
-                # Shu artikul va shop bo'yicha jami qoldiq (barcha ranglar)
-                curr_stock = qoldiq_merged[(qoldiq_merged['Артикул'] == art) & (qoldiq_merged['Магазин'] == shop)]['Кол-во'].sum()
+                # Rangni tozalash (Sana qismi bo'lsa olib tashlaymiz)
+                # "Qora (15.01.2024)" -> "Qora"
+                raw_color = str(order['color'])
+                if "(" in raw_color:
+                    clean_color = raw_color.split("(")[0].strip()
+                else:
+                    clean_color = raw_color.strip()
+
+                # Filtrlash: Artikul + Shop + Rang
+                curr_stock = qoldiq_merged[
+                    (qoldiq_merged['Артикул'] == art) & 
+                    (qoldiq_merged['Магазин'] == shop) &
+                    (qoldiq_merged['Цвет'] == clean_color)
+                ]['Кол-во'].sum()
                 
                 init_stock = order['initial_stock'] if order['initial_stock'] is not None else 0
                 
+                # Agar qoldiq oshgan bo'lsa
                 if curr_stock > init_stock:
                     ids_to_delete.append(order['id'])
-                    print(f"✅ KELDI: {art} ({shop}) | {init_stock} -> {curr_stock}")
+                    # Logga rangni ham chiqaramiz
+                    print(f"✅ KELDI: {art} | {clean_color} | {shop} ({init_stock} -> {curr_stock})")
 
             if ids_to_delete:
                 id_tuple = tuple(ids_to_delete)
@@ -532,7 +531,7 @@ def analyze_and_generate_orders(engine):
                 
                 with engine.begin() as conn:
                     conn.execute(delete_query)
-                print(f"🗑 {len(ids_to_delete)} ta yetib kelgan zakaz o'chirildi.")
+                print(f"🗑 {len(ids_to_delete)} ta yetib kelgan zakaz (Rang bo'yicha) o'chirildi.")
 
     except Exception as e:
         print(f"⚠️ Avto-tozalashda xatolik: {e}")

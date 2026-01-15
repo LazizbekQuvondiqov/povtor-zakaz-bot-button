@@ -482,3 +482,49 @@ def get_import_orders_detailed(min_day, max_day, category, subcategory):
     except Exception as e:
         print(f"❌ Import detallarini olishda xatolik: {e}")
         return pd.DataFrame()
+# --- YANGI QISM: BLOKLASH VA GLOBAL QULF ---
+
+# Yangi jadval: Bloklanganlar
+class BlockedUser(Base):
+    __tablename__ = 'blocked_users'
+    id = Column(Integer, primary_key=True)
+    telegram_id = Column(BigInteger, unique=True)
+
+# 1. Botni yopish/ochish (Sozlamalar jadvaliga yozamiz)
+def set_global_lock(is_locked: bool):
+    """True = Yopish, False = Ochish"""
+    val = 1.0 if is_locked else 0.0
+    # update_setting funksiyasi bor edi, shundan foydalanamiz
+    if not update_setting('global_lock', val):
+        # Agar yo'q bo'lsa yangi yaratamiz
+        session = Session()
+        session.add(Setting(rule_name='global_lock', rule_value=val))
+        session.commit()
+        session.close()
+
+def is_global_locked() -> bool:
+    settings = get_all_settings()
+    return settings.get('global_lock', 0.0) == 1.0
+
+# 2. Userni bloklash
+def toggle_block_user(telegram_id: int, block: bool):
+    session = Session()
+    try:
+        user = session.query(BlockedUser).filter_by(telegram_id=telegram_id).first()
+        if block:
+            if not user: session.add(BlockedUser(telegram_id=telegram_id))
+        else:
+            if user: session.delete(user)
+        session.commit()
+        return True
+    except:
+        return False
+    finally:
+        session.close()
+
+def is_blocked(telegram_id: int) -> bool:
+    session = Session()
+    try:
+        return session.query(BlockedUser).filter_by(telegram_id=telegram_id).first() is not None
+    finally:
+        session.close()

@@ -969,69 +969,107 @@ async def imp_sub_click(callback: CallbackQuery):
     
     mn, mx, cat, sub = data
     
-    # 1. Bazadan ma'lumot olamiz
-    orders_df = await asyncio.to_thread(db_manager.get_import_orders_detailed, mn, mx, cat, sub)
+    # 1. Bazadan ma'lumot olamiz (Yangi 'Kutilmoqda' lar)
+    new_orders = await asyncio.to_thread(db_manager.get_import_orders_detailed, mn, mx, cat, sub)
     
-    if orders_df.empty:
+    # 2. Sariq va Qizillarni olamiz ('Topdim' statusi)
+    # Buning uchun alohida funksiya yozish shart emas, shu yerdan filtrlaymiz
+    # Lekin get_import_orders_detailed faqat 'Kutilmoqda' ni qaytaradi.
+    # Bizga 'Topdim' ham kerak. 
+    # Keling, db_manager ga murojaat qilmasdan, to'g'ridan-to'g'ri SQL bilan olamiz (tezroq bo'ladi)
+    
+    query = """
+    SELECT * FROM generated_orders 
+    WHERE category = %(cat)s AND subcategory = %(sub)s
+    """
+    all_orders = pd.read_sql(query, db_manager.engine, params={"cat": cat, "sub": sub})
+    
+    if all_orders.empty:
         await callback.answer("⚠️ Ma'lumot topilmadi.", show_alert=True)
         return
 
     await callback.message.delete()
-    await callback.message.answer(f"⏳ <b>{cat} > {sub}</b> ({mn}-{mx} kun)\nMa'lumotlar yuklanmoqda...")
+    await callback.message.answer(f"⏳ <b>{cat} > {sub}</b>\nMa'lumotlar yuklanmoqda...")
 
-    # 2. Artikul bo'yicha guruhlaymiz
-    grouped = orders_df.groupby('artikul')
+    # --- GURUHLASH ---
+    # Qizil (Topdim + 3 kun o'tgan)
+    now = datetime.now()
+    all_orders['created_at_dt'] = pd.to_datetime(all_orders['created_at'])
+    
+    # Maska (Shartlar)
+    is_topdim = all_orders['status'] == 'Topdim'
+    is_new = all_orders['status'] == 'Kutilmoqda'
+    is_late = (now - all_orders['created_at_dt']).dt.days >= 3
+    
+    red_df = all_orders[is_topdim & is_late].copy()
+    yellow_df = all_orders[is_topdim & ~is_late].copy()
+    white_df = all_orders[is_new].copy()
+
+    # --- 1. QIZIL (MUAMMO) ---
+    if not red_df.empty:
+        await message_sender(callback.message, red_df, "🚨 <b>DIQQAT! KECHIKKANLAR (3+ kun):</b>", "red")
+
+    # --- 2. OQ (YANGI) ---
+    if not white_df.empty:
+        await message_sender(callback.message, white_df, "🔥 <b>YANGI EHTIYOJLAR:</b>", "white", pending_df=yellow_df)
+
+    # --- 3. SARIQ (JARAYONDA) ---
+    if not yellow_df.empty:
+        await message_sender(callback.message, yellow_df, "⏳ <b>JARAYONDA (Yo'lda):</b>", "yellow")
+
+    # Tugatish menyusi
+    kb = [[InlineKeyboardButton(text="🔄 Boshqa bo'lim", callback_data="impBack_root")]]
+    await bot.send_message(callback.message.chat.id, "✅ Ro'yxat tugadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+# --- YORDAMCHI FUNKSIYA (Xabar chiqaruvchi) ---
+async def message_sender(message, df, title, color_type, pending_df=None):
+    await bot.send_message(message.chat.id, title)
+    grouped = df.groupby('artikul')
     
     for article, group in grouped:
         first = group.iloc[0]
         price = first.get('supply_price', 0)
-        try:
-            price_str = f"{float(price):,.0f}".replace(",", " ")
-        except:
-            price_str = "0"
+        try: price_str = f"{float(price):,.0f}".replace(",", " ")
+        except: price_str = "0"
 
-        # --- O'ZGARISH: TUGMALAR QO'SHILDI ---
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Topdim", callback_data=f"feedback:Topdim:{article}"),
-             InlineKeyboardButton(text="❌ Topilmadi", callback_data=f"feedback:Topilmadi:{article}")]
-        ])
-        # -------------------------------------
+        # Tugmalar
+        kb = []
+        if color_type == "white": # Yangi
+            kb.append([InlineKeyboardButton(text="✅ Topdim", callback_data=f"feedback:Topdim:{article}"),
+                       InlineKeyboardButton(text="❌ Topilmadi", callback_data=f"feedback:Topilmadi:{article}")])
+        elif color_type == "red" or color_type == "yellow": # Eski
+            kb.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"cancel_order:{article}")])
+        
+        # Eslatma (Agar Oq bo'lsa va Sariqda ham bori bo'lsa)
+        warning = ""
+        if color_type == "white" and pending_df is not None:
+            match = pending_df[pending_df['artikul'] == article]
+            if not match.empty:
+                qty = match['quantity'].sum()
+                warning = f"\n⚠️ <b>Eslatma:</b> {int(qty)} ta yo'lda."
 
-        # Matn: Supplier nomi va Umumiy ma'lumot
-        caption = f"📦 <b>{article}</b>\n"
-        caption += f"👤 Postavchik: <b>{first.get('supplier', 'Noma\'lum')}</b>\n"
-        caption += f"💵 Tan Narx: <b>{price_str} so'm</b>\n"
-        caption += f"Toifa: {first.get('subcategory', '-')}\n"
-
-        # Do'konlar
+        # Matn
+        icon = "🔴" if color_type == "red" else ("🟡" if color_type == "yellow" else "📦")
+        caption = f"{icon} <b>{article}</b>{warning}\n"
+        if color_type == "white":
+            caption += f"👤 {first.get('supplier', '-')}\n💵 {price_str} so'm\n"
+        
         for shop, s_group in group.groupby('shop'):
             caption += f"\n🏪 <b>{shop}:</b>"
             for _, row in s_group.iterrows():
-                color_info = row.get('color', '-')
-                caption += f"\n  - {color_info}: <b>{int(row.get('quantity', 0))} pochka</b>"
+                caption += f"\n  - {row.get('color','-')}: <b>{int(row.get('quantity', 0))} pochka</b>"
 
+        # Rasm
         photo = str(first.get('photo', ''))
-        
         try:
             if photo.startswith('http'):
-                if len(caption) > 1024:
-                    await bot.send_photo(callback.message.chat.id, photo)
-                    # Matn alohida ketganda tugmani matnga ulaymiz
-                    await bot.send_message(callback.message.chat.id, caption, reply_markup=keyboard)
-                else:
-                    # Rasm bilan birga tugma
-                    await bot.send_photo(callback.message.chat.id, photo, caption=caption, reply_markup=keyboard)
+                await bot.send_photo(message.chat.id, photo, caption=caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
             else:
-                # Faqat matn bo'lsa
-                await bot.send_message(callback.message.chat.id, caption, reply_markup=keyboard)
-        except Exception:
-            await bot.send_message(callback.message.chat.id, caption, reply_markup=keyboard)
+                await bot.send_message(message.chat.id, caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+        except:
+            await bot.send_message(message.chat.id, caption, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+        await asyncio.sleep(0.2)
         
-        await asyncio.sleep(0.3)
-
-    # Ro'yxat tugagach chiqadigan menyu
-    kb = [[InlineKeyboardButton(text="🔄 Boshqa bo'lim", callback_data="impBack_root")]]
-    await bot.send_message(callback.message.chat.id, "✅ Ro'yxat tugadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 @dp.callback_query(F.data == "impBack_root")
 async def imp_back_root(callback: CallbackQuery):
     await import_analysis_start(callback.message)

@@ -28,8 +28,34 @@ import data_engine
 STAT_CACHE = {}
 # --- Bot sozlamalari ---
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-dp = Dispatcher()
+class SecurityMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        user = data.get("event_from_user")
+        if not user: return await handler(event, data)
+        
+        user_id = user.id
 
+        # 1. SUPER ADMINGA MUMKIN (Sizga har doim ruxsat)
+        if user_id == config.SUPER_ADMIN_ID:
+            return await handler(event, data)
+
+        # 2. TEKSHIRUV: Bot yopiqmi YOKI User blokdami?
+        if db_manager.is_global_locked() or db_manager.is_blocked(user_id):
+            # Javob qaytaramiz
+            if isinstance(event, Message):
+                await event.answer("Hozircha zakazlar yo'q")
+            elif isinstance(event, CallbackQuery):
+                await event.answer("Hozircha zakazlar yo'q", show_alert=True)
+            return # Bot shu yerda to'xtaydi, buyruq bajarilmaydi
+
+        return await handler(event, data)
+dp = Dispatcher()
+dp.update.middleware(SecurityMiddleware())
 class Registration(StatesGroup):
     choosing_name = State()
     changing_name = State()

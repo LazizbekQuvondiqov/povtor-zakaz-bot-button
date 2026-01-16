@@ -663,35 +663,69 @@ async def confirm_cancel_handler(callback: CallbackQuery):
 async def feedback_handler(callback: CallbackQuery):
     _, status, artikul = callback.data.split(":")
     
-    new_db_status = 'Topdim' if status == 'Topdim' else 'Topilmadi'
-    
-    if new_db_status == 'Topdim':
+    # Agar "Topdim" tugmasi bosilgan bo'lsa
+    if status == 'Topdim':
+        # 1. Bazada statusni o'zgartiramiz
         if db_manager.update_order_status(artikul, 'Topdim'):
             
-            # --- O'ZGARISH SHU YERDA ---
-            new_text = f"✅ <b>{artikul}</b> 'Kutilmoqda' ro'yxatiga o'tkazildi."
-            
+            # --- A) BOTDAGI XABARNI O'ZGARTIRISH ---
+            new_text = f"✅ <b>{artikul}</b> qabul qilindi va 'Kutilmoqda' ro'yxatiga o'tkazildi."
             try:
-                # Agar xabarda rasm bo'lsa -> Captionni o'zgartiramiz
                 if callback.message.photo:
                     await callback.message.edit_caption(caption=new_text, reply_markup=None)
-                # Agar faqat matn bo'lsa -> Textni o'zgartiramiz
                 else:
                     await callback.message.edit_text(new_text, reply_markup=None)
-            except Exception as e:
-                # Agar o'zgartirishda xato bo'lsa, shunchaki tugmani olib tashlaymiz
-                await callback.message.edit_reply_markup(reply_markup=None)
-
-            # Kanalga yuborish
-            try:
-                if callback.message.photo:
-                    photo_id = callback.message.photo[-1].file_id
-                    await bot.send_photo(chat_id=config.ARCHIVE_CHANNEL_ID, photo=photo_id, caption=f"✅ Topildi: {artikul}\n👤 {callback.from_user.full_name}")
-                else:
-                    await bot.send_message(chat_id=config.ARCHIVE_CHANNEL_ID, text=f"✅ Topildi: {artikul}\n👤 {callback.from_user.full_name}")
             except: pass
+
+            # --- B) KANALGA TO'LIQ HISOBOT YUBORISH (YANGI KOD) ---
+            try:
+                # Bazadan to'liq ma'lumotni olamiz
+                details_df = db_manager.get_confirmed_order_details(artikul)
+                
+                if not details_df.empty:
+                    first_row = details_df.iloc[0]
+                    supplier_name = first_row['supplier']
+                    photo_url = str(first_row['photo'])
+                    
+                    # Umumiy pochka sonini hisoblaymiz
+                    total_qty = details_df['quantity'].sum()
+
+                    # Xabarni chiroyli yig'amiz
+                    report = f"✅ <b>YUK KELYAPTI! (Tasdiqlandi)</b>\n\n"
+                    report += f"📦 Artikul: <b>{artikul}</b>\n"
+                    report += f"🚛 Yetkazuvchi: <b>{supplier_name}</b>\n"
+                    report += f"👤 Tasdiqladi: <b>{callback.from_user.full_name}</b>\n"
+                    report += f"🔢 Jami miqdor: <b>{int(total_qty)} pochka</b>\n"
+                    report += "━━━━━━━━━━━━━━\n"
+                    report += "📋 <b>TARQATISH RO'YXATI:</b>\n"
+
+                    # Do'konlar bo'yicha guruhlaymiz
+                    for shop, group in details_df.groupby('shop'):
+                        report += f"\n🏪 <b>{shop}:</b>"
+                        for _, row in group.iterrows():
+                            # Rang va sonini yozamiz
+                            color_info = row['color']
+                            qty_info = int(row['quantity'])
+                            report += f"\n   — {color_info}: <b>{qty_info} pochka</b>"
+                    
+                    report += "\n━━━━━━━━━━━━━━\n⚠️ <i>Skladchi diqqatiga: Yuk kelganda shu ro'yxat bo'yicha qabul qiling!</i>"
+
+                    # Kanalga yuborish (Rasmi bo'lsa rasm bilan, bo'lmasa matn)
+                    if photo_url and photo_url.startswith('http'):
+                        await bot.send_photo(chat_id=config.ARCHIVE_CHANNEL_ID, photo=photo_url, caption=report)
+                    else:
+                        await bot.send_message(chat_id=config.ARCHIVE_CHANNEL_ID, text=report)
+                else:
+                    # Agar biror sabab bilan detal chiqmasa, oddiy xabar
+                    await bot.send_message(chat_id=config.ARCHIVE_CHANNEL_ID, text=f"✅ Topildi: {artikul} (Tafsilotlar topilmadi)")
+
+            except Exception as e:
+                print(f"Kanalga yuborishda xato: {e}")
+                # Xato bo'lsa ham bot to'xtab qolmasligi kerak
+                pass
             
     else:
+        # Agar "Topilmadi" bosilgan bo'lsa
         await callback.message.delete()
         await callback.answer("❌ Tushunarli, topilmadi.", show_alert=True)
 # --- SOZLAMALAR CALLBACKLARI ---

@@ -558,3 +558,20 @@ def is_blocked(telegram_id: int) -> bool:
         return session.query(BlockedUser).filter_by(telegram_id=telegram_id).first() is not None
     finally:
         session.close()
+
+# --- KANAL UCHUN MA'LUMOT OLISH ---
+def get_confirmed_order_details(artikul: str):
+    """
+    Kanalga yuborish uchun 'Topdim' bo'lgan tovarning to'liq tafsilotlarini oladi.
+    """
+    try:
+        query = """
+        SELECT supplier, shop, color, quantity, photo 
+        FROM generated_orders 
+        WHERE artikul = %(artikul)s AND status = 'Topdim'
+        """
+        df = pd.read_sql(query, engine, params={"artikul": artikul})
+        return df
+    except Exception as e:
+        print(f"❌ Kanal ma'lumotini olishda xatolik: {e}")
+        return pd.DataFrame()

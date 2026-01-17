@@ -685,13 +685,18 @@ async def feedback_handler(callback: CallbackQuery):
                     first_row = details_df.iloc[0]
                     supplier_name = first_row['supplier']
                     photo_url = str(first_row['photo'])
-                    
+                    price = first_row.get('supply_price', 0)
+                    try:
+                        price_str = f"{float(price):,.0f}".replace(",", " ")
+                    except:
+                        price_str = "0"
                     # Umumiy pochka sonini hisoblaymiz
                     total_qty = details_df['quantity'].sum()
 
                     # Xabarni chiroyli yig'amiz
                     report = f"✅ <b>YUK KELYAPTI! (Tasdiqlandi)</b>\n\n"
                     report += f"📦 Artikul: <b>{artikul}</b>\n"
+                    report += f"💵 Tan Narx: <b>{price_str} so'm</b>\n" 
                     report += f"🚛 Yetkazuvchi: <b>{supplier_name}</b>\n"
                     report += f"👤 Tasdiqladi: <b>{callback.from_user.full_name}</b>\n"
                     report += f"🔢 Jami miqdor: <b>{int(total_qty)} pochka</b>\n"
@@ -707,7 +712,7 @@ async def feedback_handler(callback: CallbackQuery):
                             qty_info = int(row['quantity'])
                             report += f"\n   — {color_info}: <b>{qty_info} pochka</b>"
                     
-                    report += "\n━━━━━━━━━━━━━━\n⚠️ <i>Skladchi diqqatiga: Yuk kelganda shu ro'yxat bo'yicha qabul qiling!</i>"
+                    report += "\n━━━━━━━━━━━━━━\n⚠️ <i>Skladchi diqqatiga: Yuk kelganda shu ro'yxat bo'yicha qabul tarqating!</i>"
 
                     # Kanalga yuborish (Rasmi bo'lsa rasm bilan, bo'lmasa matn)
                     if photo_url and photo_url.startswith('http'):

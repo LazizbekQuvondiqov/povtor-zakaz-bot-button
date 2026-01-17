@@ -129,26 +129,31 @@ async def send_welcome(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
 
-    # --- SUPER ADMIN MENYUSI ---
+    # --- 1. SUPER ADMIN MENYUSI (HAMMA NARSASI BOR) ---
     if user_id == config.SUPER_ADMIN_ID:
         is_locked = db_manager.is_global_locked()
         lock_text = "🟢 Tizimni OCHISH" if is_locked else "🔴 Tizimni YOPISH"
         
         kb = [
+            # 1-qator: Tizimni boshqarish
             [KeyboardButton(text=lock_text)],
-            # Yangi tugmalar qatori:
-            [KeyboardButton(text="✅ VIP Qo'shish"), KeyboardButton(text="❌ VIP Olish")], 
+            
+            # 2-qator: VIP va Bloklash boshqaruvi
+            [KeyboardButton(text="✅ VIP Qo'shish"), KeyboardButton(text="❌ VIP Olish")],
             [KeyboardButton(text="🔒 Bloklash"), KeyboardButton(text="🔓 Blokdan ochish")],
-            [KeyboardButton(text="📊 Hisobot"), KeyboardButton(text="⚙️ Sozlamalar")]
+            
+            # 3-qator: Asosiy funksiyalar (Siz so'raganlar qaytdi 👇)
+            [KeyboardButton(text="📊 Hisobot"), KeyboardButton(text="📈 Statistika")],
+            [KeyboardButton(text="⚙️ Sozlamalar"), KeyboardButton(text="🔄 Majburiy Yangilash")]
         ]
+        
         await message.answer(
             f"👑 <b>Bosh Admin Panel</b>\nHolat: {'🚫 Yopiq' if is_locked else '✅ Ochiq'}",
             reply_markup=ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
         )
         return
-    
-    # ... (kodning qolgan qismi davom etadi: Admin va Supplier tekshiruvi) ...
-    # 1. Admin menyusi
+
+    # --- 2. ODDIY ADMIN MENYUSI ---
     if db_manager.is_admin(user_id):
         await message.answer(
             "👋 Assalomu alaykum, <b>Admin!</b>\n\nQuyidagi menyudan kerakli bo'limni tanlang:",
@@ -156,7 +161,7 @@ async def send_welcome(message: Message, state: FSMContext):
         )
         return
 
-    # 2. Ro'yxatdan o'tgan Supplier menyusi
+    # --- 3. SUPPLIER (YETKAZIB BERUVCHI) MENYUSI ---
     supplier = db_manager.get_supplier_by_id(user_id)
     if supplier:
         await message.answer(
@@ -165,30 +170,24 @@ async def send_welcome(message: Message, state: FSMContext):
         )
         return
 
-    # 3. Taklif qilingan (lekin ro'yxatdan o'tmagan) foydalanuvchi
+    # --- 4. YANGI YOKI TAKLIF QILINGAN FOYDALANUVCHI ---
     invitation = db_manager.check_invitation(user_id)
     if invitation:
-        # --- O'ZGARISH SHU YERDA ---
-        # To'g'ridan-to'g'ri ro'yxatni chiqarish o'rniga, Kategoriya tanlashga yo'naltiramiz
         categories = db_manager.get_unassigned_categories()
-
         if not categories:
             await message.answer("Hozircha bo'sh yetkazib beruvchi nomlari yo'q.")
             return
 
         kb_builder = []
         for cat in categories:
-            # Callback datani 'regCat_' deb nomlaymiz (register jarayoni ekanini bilish uchun)
             kb_builder.append([InlineKeyboardButton(text=cat, callback_data=f"regCat_{cat}")])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=kb_builder)
-
         await message.answer(
             "👋 Assalomu alaykum! Tizimga kirish uchun avval faoliyat turingizni (Kategoriya) tanlang:",
             reply_markup=keyboard
         )
         await state.set_state(Registration.filter_category)
-        # ---------------------------
     else:
         await message.answer("🚫 Kechirasiz, siz tizimga taklif qilinmagansiz.")
 # --- ADMIN TUGMALARI UCHUN HANDLERLAR ---

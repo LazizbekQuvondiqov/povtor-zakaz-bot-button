@@ -566,7 +566,7 @@ def get_confirmed_order_details(artikul: str):
     """
     try:
         query = """
-        SELECT supplier, shop, color, quantity, photo 
+        SELECT supplier, shop, color, quantity, photo, supply_price
         FROM generated_orders 
         WHERE artikul = %(artikul)s AND status = 'Topdim'
         """

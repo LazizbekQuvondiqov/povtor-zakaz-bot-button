@@ -1030,6 +1030,7 @@ async def main():
 
 # --- bot.py ---
 
+# 1-FUNKSIYA: MENYUGA TUGMA QO'SHISH
 @dp.message(F.text == "📅 Import Tahlili")
 async def import_analysis_start(message: types.Message):
     # 1. Bazadan Admin o'rnatgan qoidalarni olamiz
@@ -1043,7 +1044,7 @@ async def import_analysis_start(message: types.Message):
         1: "❄️ 1-Qoida (Eski)"
     }
 
-    # 4 dan 1 gacha aylanamiz (Eski kod)
+    # 4 dan 1 gacha aylanamiz
     for i in [4, 3, 2, 1]:
         min_d = int(settings.get(f'm{i}_min_days', 0))
         max_d = int(settings.get(f'm{i}_max_days', 0))
@@ -1054,7 +1055,6 @@ async def import_analysis_start(message: types.Message):
     kb = []
     
     # --- YANGI QO'SHILGAN TUGMA (MIX) ---
-    # Bu tugma maxsus callback data yuboradi: "impMixSpecial"
     kb.append([InlineKeyboardButton(text="🧥 KIYIMLAR (2, 3, 4 - Qoidalar)", callback_data="impMixSpecial")])
     # ------------------------------------
 
@@ -1069,61 +1069,71 @@ async def import_analysis_start(message: types.Message):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
-# --- bot.py ---
-# Buni import_analysis_start funksiyasidan keyinroqqa tashlang
 
+# 2-FUNKSIYA: ZAKAZLARNI CHIQARISH (POSTAVCHIK SORTIROVKASI BILAN)
 @dp.callback_query(F.data == "impMixSpecial")
 async def import_mix_special_click(callback: CallbackQuery):
     # 1. Sozlamalarni olamiz
     settings = db_manager.get_all_settings()
     
-    # 2. 4-Qoida (Boshi) va 2-Qoida (Oxiri) kunlarini olamiz
-    # Maqsad: 4, 3 va 2-qoidalarni qamrab oladigan yagona diapazon yasash.
-    # Masalan: 4-qoida (1-5 kun), 2-qoida (10-15 kun) -> Natija: 1-15 kun.
-    min_day = int(settings.get('m4_min_days', 1))  # Eng yangi kun boshi
-    max_day = int(settings.get('m2_max_days', 15)) # 2-qoida oxiri
+    # 4-qoida boshi va 2-qoida oxiri
+    min_day = int(settings.get('m4_min_days', 1)) 
+    max_day = int(settings.get('m2_max_days', 15))
 
-    # 3. Bizga kerak bo'lgan maxsus kategoriyalar ro'yxati
-    target_categories = [
-        "Верхняя одежда", 
-        "Комплект", 
-        "Плечевые одежды"
-    ]
+    # Kerakli kategoriyalar
+    target_cats = "('Верхняя одежда', 'Комплект', 'Плечевые одежды')"
 
-    # 4. Bazadan shu kun oralig'idagi BARCHA kategoriyalarni olamiz
-    all_cats = db_manager.get_stats_by_import_days(min_day, max_day)
+    await callback.message.delete()
+    await callback.message.answer(f"⏳ <b>KIYIMLAR (Mix)</b>\nZakazlar yuklanmoqda ({min_day}-{max_day} kunlik)...")
+
+    # SQL da POSTAVCHIK bo'yicha sortirovka (ORDER BY supplier ASC)
+    query = f"""
+    SELECT * FROM generated_orders 
+    WHERE days_passed >= {min_day} AND days_passed <= {max_day}
+    AND category IN {target_cats}
+    ORDER BY supplier ASC, artikul ASC
+    """
     
-    if not all_cats:
-        await callback.answer("⚠️ Bu oraliqda (2-3-4 qoidalar) hech qanday zakaz yo'q.", show_alert=True)
+    try:
+        all_orders = pd.read_sql(query, db_manager.engine)
+    except Exception as e:
+        await callback.message.answer(f"❌ Xatolik: {e}")
         return
 
-    # 5. Filtrlash: Bazadan kelganlardan faqat bizga keraklilarini olib qolamiz
-    filtered_cats = [cat for cat in all_cats if cat in target_categories]
-
-    if not filtered_cats:
-        await callback.answer("⚠️ Zakazlar bor, lekin aynan 'Kiyimlar' (siz so'ragan kategoriyalar) bo'yicha yo'q.", show_alert=True)
+    if all_orders.empty:
+        await callback.message.answer("✅ Bu kategoriyalar bo'yicha zakazlar topilmadi.")
         return
 
-    # 6. Tugmalarni yasash (Xuddi standart Import Tahlilidek)
-    kb = []
-    for cat in filtered_cats:
-        unique_id = str(uuid.uuid4())[:8]
-        # Eslab qolamiz: Bu ID orqasida 1-15 kun oralig'i va shu kategoriya turibdi
-        STAT_CACHE[unique_id] = (min_day, max_day, cat)
-        
-        # Standart handlerga yo'naltiramiz (impCat_)
-        # Bu degani: keyingi qadamlar (Podkategoriya -> Kartochkalar) o'z-o'zidan ishlayveradi!
-        kb.append([InlineKeyboardButton(text=f"📂 {cat}", callback_data=f"impCat_{unique_id}")])
+    # --- GURUHLASH ---
+    now = datetime.now()
+    all_orders['created_at_dt'] = pd.to_datetime(all_orders['created_at'])
     
-    kb.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="impBack_root")])
+    is_topdim = all_orders['status'] == 'Topdim'
+    is_new = all_orders['status'] == 'Kutilmoqda'
+    is_late = (now - all_orders['created_at_dt']).dt.days >= 3
     
-    await callback.message.edit_text(
-        f"🧥 <b>MAXSUS FILTR (Kiyimlar)</b>\n"
-        f"📅 Qamrov: <b>{min_day}-{max_day} kunlik</b> (2, 3, 4-qoidalar)\n\n"
-        f"Mavjud bo'limni tanlang:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
-    )
-# 1. Kun tanlanganda -> Kategoriya chiqadi
+    red_df = all_orders[is_topdim & is_late].copy()
+    yellow_df = all_orders[is_topdim & ~is_late].copy()
+    white_df = all_orders[is_new].copy()
+
+    # HAR BIR GURUHNI SUPPLIER BO'YICHA QAYTA SARALAYMIZ
+    # (Chunki guruhlarga ajratganda tartib buzilishi mumkin, bizga esa A dan Z gacha kerak)
+    
+    if not red_df.empty:
+        red_df = red_df.sort_values(by=['supplier', 'artikul'])
+        await message_sender(callback.message, red_df, "🚨 <b>DIQQAT! KECHIKKANLAR (3+ kun):</b>", "red")
+
+    if not white_df.empty:
+        white_df = white_df.sort_values(by=['supplier', 'artikul'])
+        await message_sender(callback.message, white_df, "🔥 <b>YANGI ZAKAZLAR (Kiyimlar):</b>", "white", pending_df=yellow_df)
+
+    if not yellow_df.empty:
+        yellow_df = yellow_df.sort_values(by=['supplier', 'artikul'])
+        await message_sender(callback.message, yellow_df, "⏳ <b>JARAYONDA (Yo'lda):</b>", "yellow")
+
+    kb = [[InlineKeyboardButton(text="🔄 Menyuga qaytish", callback_data="impBack_root")]]
+    await bot.send_message(callback.message.chat.id, "✅ Ro'yxat tugadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    
 @dp.callback_query(F.data.startswith("impRange_"))
 async def imp_range_click(callback: CallbackQuery):
     mn, mx = map(int, callback.data.split("_")[1].split("-"))

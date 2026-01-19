@@ -1364,5 +1364,94 @@ async def do_disallow(message: Message, state: FSMContext):
         await message.answer(f"❌ {tid} dan maxsus ruxsat olib tashlandi.")
     except: await message.answer("❌ ID faqat raqam bo'lishi kerak.")
     await state.clear()
+
+async def send_mix_batch(chat_id, batch_id):
+    data = STAT_CACHE.get(batch_id)
+    if not data:
+        await bot.send_message(chat_id, "⚠️ Ma'lumot eskirgan. Iltimos, bo'limga qaytadan kiring.")
+        return
+
+    full_df = data['full_df']
+    all_artikuls = data['artikuls']
+    offset = data['offset']
+    limit = data['batch_size']
+
+    # 1. Hozirgi partiyaga kerakli artikullarni kesib olamiz
+    current_artikuls = all_artikuls[offset : offset + limit]
+    
+    if len(current_artikuls) == 0:
+        await bot.send_message(chat_id, "✅ Ro'yxat to'liq tugadi.")
+        return
+
+    # Foydalanuvchiga qayerdaligini bildiramiz
+    await bot.send_message(chat_id, f"🚀 <b>YUKLANMOQDA...</b>\n{offset+1} dan {offset+len(current_artikuls)} gacha (Jami: {len(all_artikuls)})")
+
+    # 2. Shu artikullarga tegishli qatorlarni DF dan ajratib olamiz
+    batch_df = full_df[full_df['artikul'].isin(current_artikuls)].copy()
+
+    # 3. Guruhlash va Yuborish
+    now = datetime.now()
+    batch_df['created_at_dt'] = pd.to_datetime(batch_df['created_at'])
+    
+    is_topdim = batch_df['status'] == 'Topdim'
+    is_late = (now - batch_df['created_at_dt']).dt.days >= 3
+    
+    # Tartib buzilmasligi uchun yana sort qilamiz (Supplier -> Artikul)
+    batch_df = batch_df.sort_values(by=['supplier', 'artikul'])
+
+    red_df = batch_df[is_topdim & is_late]
+    yellow_df = batch_df[is_topdim & ~is_late]
+    white_df = batch_df[batch_df['status'] == 'Kutilmoqda']
+
+    # Xabar yuborish uchun soxta Message obyekti
+    class DummyMsg:
+        def __init__(self, cid): self.chat = type('obj', (object,), {'id': cid})
+    
+    dummy_msg = DummyMsg(chat_id)
+
+    # --- QIZIL (MUAMMO) ---
+    if not red_df.empty:
+        # message_sender funksiyasi o'zi artikul va supplier nomini chiqaradi
+        await message_sender(dummy_msg, red_df, "🚨 <b>DIQQAT! KECHIKKANLAR:</b>", "red")
+    
+    # --- OQ (YANGI) ---
+    if not white_df.empty:
+        # Sariqda borlarini eslatma qilish uchun butun df dan qidiramiz
+        full_yellow = full_df[(full_df['status']=='Topdim') & ~(full_df['artikul'].isin(current_artikuls))]
+        # Bu yerda message_sender 'white' rejimi uchun Narx va Supplierni chiqaradi
+        await message_sender(dummy_msg, white_df, "🔥 <b>YANGI ZAKAZLAR:</b>", "white", pending_df=full_yellow)
+
+    # --- SARIQ (JARAYONDA) ---
+    if not yellow_df.empty:
+        await message_sender(dummy_msg, yellow_df, "⏳ <b>JARAYONDA (Yo'lda):</b>", "yellow")
+
+    # 4. Keyingi qadam uchun ma'lumotni yangilaymiz
+    data['offset'] += limit
+    
+    # 5. "DAVOM ETISH" va "TO'XTATISH" Tugmalari
+    if data['offset'] < len(all_artikuls):
+        remains = len(all_artikuls) - data['offset']
+        kb = [
+            [InlineKeyboardButton(text=f"▶️ DAVOM ETISH (Yana {remains} ta)", callback_data=f"nextMix_{batch_id}")],
+            [InlineKeyboardButton(text="⏹ TO'XTATISH", callback_data="del_msg")]
+        ]
+        await bot.send_message(chat_id, "👇 Keyingi partiyani yuklaymizmi?", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    else:
+        # Agar tugagan bo'lsa
+        kb = [[InlineKeyboardButton(text="🔄 Menyuga qaytish", callback_data="impBack_root")]]
+        await bot.send_message(chat_id, "✅ <b>BARCHASI YUBORILDI.</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+@dp.callback_query(F.data.startswith("nextMix_"))
+async def next_mix_batch_handler(callback: CallbackQuery):
+    batch_id = callback.data.split("_")[1]
+    
+    # Eski "Davom etish" tugmasini o'chirib tashlaymiz (Chat toza turishi uchun)
+    try:
+        await callback.message.delete()
+    except:
+        pass
+        
+    # Keyingi partiyani yuboramiz
+    await send_mix_batch(callback.message.chat.id, batch_id)
 if __name__ == "__main__":
     asyncio.run(main())

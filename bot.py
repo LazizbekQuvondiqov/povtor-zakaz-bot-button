@@ -1028,6 +1028,8 @@ async def main():
 # --- IMPORT (KUN) TAHLILI LOGIKASI (GLOBAL KO'RISH) ---
 # -------------------------------------------------------------------------
 
+# --- bot.py ---
+
 @dp.message(F.text == "📅 Import Tahlili")
 async def import_analysis_start(message: types.Message):
     # 1. Bazadan Admin o'rnatgan qoidalarni olamiz
@@ -1041,7 +1043,7 @@ async def import_analysis_start(message: types.Message):
         1: "❄️ 1-Qoida (Eski)"
     }
 
-    # 4 dan 1 gacha aylanamiz
+    # 4 dan 1 gacha aylanamiz (Eski kod)
     for i in [4, 3, 2, 1]:
         min_d = int(settings.get(f'm{i}_min_days', 0))
         max_d = int(settings.get(f'm{i}_max_days', 0))
@@ -1050,6 +1052,12 @@ async def import_analysis_start(message: types.Message):
             ranges.append((min_d, max_d, btn_text))
     
     kb = []
+    
+    # --- YANGI QO'SHILGAN TUGMA (MIX) ---
+    # Bu tugma maxsus callback data yuboradi: "impMixSpecial"
+    kb.append([InlineKeyboardButton(text="🧥 KIYIMLAR (2, 3, 4 - Qoidalar)", callback_data="impMixSpecial")])
+    # ------------------------------------
+
     for mn, mx, label in ranges:
         kb.append([InlineKeyboardButton(text=label, callback_data=f"impRange_{mn}-{mx}")])
     
@@ -1061,6 +1069,60 @@ async def import_analysis_start(message: types.Message):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
+# --- bot.py ---
+# Buni import_analysis_start funksiyasidan keyinroqqa tashlang
+
+@dp.callback_query(F.data == "impMixSpecial")
+async def import_mix_special_click(callback: CallbackQuery):
+    # 1. Sozlamalarni olamiz
+    settings = db_manager.get_all_settings()
+    
+    # 2. 4-Qoida (Boshi) va 2-Qoida (Oxiri) kunlarini olamiz
+    # Maqsad: 4, 3 va 2-qoidalarni qamrab oladigan yagona diapazon yasash.
+    # Masalan: 4-qoida (1-5 kun), 2-qoida (10-15 kun) -> Natija: 1-15 kun.
+    min_day = int(settings.get('m4_min_days', 1))  # Eng yangi kun boshi
+    max_day = int(settings.get('m2_max_days', 15)) # 2-qoida oxiri
+
+    # 3. Bizga kerak bo'lgan maxsus kategoriyalar ro'yxati
+    target_categories = [
+        "Верхняя одежда", 
+        "Комплект", 
+        "Плечевые одежды"
+    ]
+
+    # 4. Bazadan shu kun oralig'idagi BARCHA kategoriyalarni olamiz
+    all_cats = db_manager.get_stats_by_import_days(min_day, max_day)
+    
+    if not all_cats:
+        await callback.answer("⚠️ Bu oraliqda (2-3-4 qoidalar) hech qanday zakaz yo'q.", show_alert=True)
+        return
+
+    # 5. Filtrlash: Bazadan kelganlardan faqat bizga keraklilarini olib qolamiz
+    filtered_cats = [cat for cat in all_cats if cat in target_categories]
+
+    if not filtered_cats:
+        await callback.answer("⚠️ Zakazlar bor, lekin aynan 'Kiyimlar' (siz so'ragan kategoriyalar) bo'yicha yo'q.", show_alert=True)
+        return
+
+    # 6. Tugmalarni yasash (Xuddi standart Import Tahlilidek)
+    kb = []
+    for cat in filtered_cats:
+        unique_id = str(uuid.uuid4())[:8]
+        # Eslab qolamiz: Bu ID orqasida 1-15 kun oralig'i va shu kategoriya turibdi
+        STAT_CACHE[unique_id] = (min_day, max_day, cat)
+        
+        # Standart handlerga yo'naltiramiz (impCat_)
+        # Bu degani: keyingi qadamlar (Podkategoriya -> Kartochkalar) o'z-o'zidan ishlayveradi!
+        kb.append([InlineKeyboardButton(text=f"📂 {cat}", callback_data=f"impCat_{unique_id}")])
+    
+    kb.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="impBack_root")])
+    
+    await callback.message.edit_text(
+        f"🧥 <b>MAXSUS FILTR (Kiyimlar)</b>\n"
+        f"📅 Qamrov: <b>{min_day}-{max_day} kunlik</b> (2, 3, 4-qoidalar)\n\n"
+        f"Mavjud bo'limni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 # 1. Kun tanlanganda -> Kategoriya chiqadi
 @dp.callback_query(F.data.startswith("impRange_"))
 async def imp_range_click(callback: CallbackQuery):

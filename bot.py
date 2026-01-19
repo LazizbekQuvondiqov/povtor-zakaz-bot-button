@@ -1073,20 +1073,18 @@ async def import_analysis_start(message: types.Message):
 # 2-FUNKSIYA: ZAKAZLARNI CHIQARISH (POSTAVCHIK SORTIROVKASI BILAN)
 @dp.callback_query(F.data == "impMixSpecial")
 async def import_mix_special_click(callback: CallbackQuery):
-    # 1. Sozlamalarni olamiz
+    # 1. Sozlamalar va kunlar
     settings = db_manager.get_all_settings()
-    
-    # 4-qoida boshi va 2-qoida oxiri
     min_day = int(settings.get('m4_min_days', 1)) 
     max_day = int(settings.get('m2_max_days', 15))
 
-    # Kerakli kategoriyalar
     target_cats = "('Верхняя одежда', 'Комплект', 'Плечевые одежды')"
 
     await callback.message.delete()
-    await callback.message.answer(f"⏳ <b>KIYIMLAR (Mix)</b>\nZakazlar yuklanmoqda ({min_day}-{max_day} kunlik)...")
+    msg = await callback.message.answer(f"⏳ <b>KIYIMLAR (Mix)</b>\nMa'lumotlar yuklanmoqda ({min_day}-{max_day} kunlik)...")
 
-    # SQL da POSTAVCHIK bo'yicha sortirovka (ORDER BY supplier ASC)
+    # 2. SQL so'rov (Postavchik bo'yicha saralangan)
+    # ORDER BY supplier ASC -> Avval Postavchik nomi, keyin Artikul bo'yicha
     query = f"""
     SELECT * FROM generated_orders 
     WHERE days_passed >= {min_day} AND days_passed <= {max_day}
@@ -1097,42 +1095,27 @@ async def import_mix_special_click(callback: CallbackQuery):
     try:
         all_orders = pd.read_sql(query, db_manager.engine)
     except Exception as e:
-        await callback.message.answer(f"❌ Xatolik: {e}")
+        await msg.edit_text(f"❌ Xatolik: {e}")
         return
 
     if all_orders.empty:
-        await callback.message.answer("✅ Bu kategoriyalar bo'yicha zakazlar topilmadi.")
+        await msg.edit_text("✅ Bu kategoriyalar bo'yicha zakazlar topilmadi.")
         return
 
-    # --- GURUHLASH ---
-    now = datetime.now()
-    all_orders['created_at_dt'] = pd.to_datetime(all_orders['created_at'])
+    # 3. Pagination (Partiyalash) uchun tayyorgarlik
+    # Unikal artikullarni tartib bilan olib olamiz
+    unique_artikuls = all_orders['artikul'].unique()
     
-    is_topdim = all_orders['status'] == 'Topdim'
-    is_new = all_orders['status'] == 'Kutilmoqda'
-    is_late = (now - all_orders['created_at_dt']).dt.days >= 3
-    
-    red_df = all_orders[is_topdim & is_late].copy()
-    yellow_df = all_orders[is_topdim & ~is_late].copy()
-    white_df = all_orders[is_new].copy()
+    batch_id = str(uuid.uuid4())[:8]
+    STAT_CACHE[batch_id] = {
+        'full_df': all_orders,       # To'liq ma'lumot
+        'artikuls': unique_artikuls, # Faqat artikullar ro'yxati
+        'offset': 0,                 # Qayerda to'xtadik
+        'batch_size': 10             # Nechtadan chiqarish (Limit)
+    }
 
-    # HAR BIR GURUHNI SUPPLIER BO'YICHA QAYTA SARALAYMIZ
-    # (Chunki guruhlarga ajratganda tartib buzilishi mumkin, bizga esa A dan Z gacha kerak)
-    
-    if not red_df.empty:
-        red_df = red_df.sort_values(by=['supplier', 'artikul'])
-        await message_sender(callback.message, red_df, "🚨 <b>DIQQAT! KECHIKKANLAR (3+ kun):</b>", "red")
-
-    if not white_df.empty:
-        white_df = white_df.sort_values(by=['supplier', 'artikul'])
-        await message_sender(callback.message, white_df, "🔥 <b>YANGI ZAKAZLAR (Kiyimlar):</b>", "white", pending_df=yellow_df)
-
-    if not yellow_df.empty:
-        yellow_df = yellow_df.sort_values(by=['supplier', 'artikul'])
-        await message_sender(callback.message, yellow_df, "⏳ <b>JARAYONDA (Yo'lda):</b>", "yellow")
-
-    kb = [[InlineKeyboardButton(text="🔄 Menyuga qaytish", callback_data="impBack_root")]]
-    await bot.send_message(callback.message.chat.id, "✅ Ro'yxat tugadi.", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    # Birinchi partiyani yuborishni boshlaymiz
+    await send_mix_batch(callback.message.chat.id, batch_id)
     
 @dp.callback_query(F.data.startswith("impRange_"))
 async def imp_range_click(callback: CallbackQuery):

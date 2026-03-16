@@ -46,7 +46,7 @@ class SecurityMiddleware(BaseMiddleware):
 
         # 2. QORA RO'YXAT (Individual blok)
         if db_manager.is_blocked(user_id):
-            msg = "😞 zakazlar topilmadi."
+            msg = ""
             if isinstance(event, Message): await event.answer(msg)
             elif isinstance(event, CallbackQuery): await event.answer(msg, show_alert=True)
             return
@@ -55,7 +55,7 @@ class SecurityMiddleware(BaseMiddleware):
         if db_manager.is_global_locked():
             # Agar tizim yopiq bo'lsa, faqat "Ruxsat berilganlar" (VIP) kira oladi
             if not db_manager.is_allowed(user_id):
-                msg = "😞 Hozircha zakazlar yo'q."
+                msg = ""
                 if isinstance(event, Message): await event.answer(msg)
                 elif isinstance(event, CallbackQuery): await event.answer(msg, show_alert=True)
                 return
